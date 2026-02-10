@@ -1,0 +1,161 @@
+# ============================================================================
+# Python
+# ============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ============================================================================
+# Virtual Environments
+# ============================================================================
+.venv
+venv/
+env/
+ENV/
+
+# ============================================================================
+# IDE & Editors
+# ============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+.emacs*
+*flymake
+.elc
+
+# ============================================================================
+# Project-specific Data
+# ============================================================================
+
+# Raw data files (should be obtained from source)
+data/raw/
+!data/raw/.gitkeep
+
+# Processed data (regenerable from pipeline)
+data/processed/*.csv
+!data/processed/.gitkeep
+
+# PINN features cache (regenerable)
+data/pinn_features/
+!data/pinn_features/.gitkeep
+
+repo_contex/
+!repo_contex/.gitkeep
+
+data/contextos/
+!data/contextos/.gitkeep
+# ============================================================================
+# Model Weights & Outputs
+# ============================================================================
+
+# Asset-specific PINN weights (generated during training)
+src/pinn/weights/asset_specific/
+!src/pinn/weights/.gitkeep
+
+# Results from backtest runs
+results/*.csv
+results/saved_models/final_agent.zip
+results/optuna_history.html
+!results/.gitkeep
+!results/best_hyperparams.yaml
+
+# ============================================================================
+# Logs & Temporary Files
+# ============================================================================
+
+# Training logs
+logs/**/*.log
+logs/**/*.out.tfevents.*
+logs/manage.log
+logs/execution.log
+logs/fine_tuning.log
+logs/tensorboard/
+!logs/.gitkeep
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
+.cache/
+*.pkl
+*.pickle
+
+# ============================================================================
+# OS Files
+# ============================================================================
+.DS_Store
+Thumbs.db
+*.lnk
+
+# ============================================================================
+# Local Configuration
+# ============================================================================
+config/local_config.yaml
+config/credentials.yaml
+.env
+.env.local
+
+# ============================================================================
+# Jupyter & Notebooks
+# ============================================================================
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+*.ipynb
+!notebooks/Thesis_Analysis.ipynb
+
+# ============================================================================
+# Testing & Coverage
+# ============================================================================
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+.tox/
+
+# ============================================================================
+# Documentation
+# ============================================================================
+docs/_build/
+site/
+
+# ============================================================================
+# Miscellaneous
+# ============================================================================
+*.bak
+*.orig
+debug_log.txt
