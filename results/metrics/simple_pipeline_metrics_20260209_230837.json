@@ -1,0 +1,32 @@
+{
+  "ppo_metrics": {
+    "mean_reward": 0.0,
+    "std_reward": 0.0,
+    "mean_length": 152232.0,
+    "min_reward": 0.0,
+    "max_reward": 0.0
+  },
+  "ddpg_metrics": {
+    "mean_reward": -0.499673455953598,
+    "std_reward": 0.0,
+    "mean_length": 152232.0,
+    "min_reward": -0.499673455953598,
+    "max_reward": -0.499673455953598
+  },
+  "a2c_metrics": {
+    "mean_reward": 0.0,
+    "std_reward": 0.0,
+    "mean_length": 152232.0,
+    "min_reward": 0.0,
+    "max_reward": 0.0
+  },
+  "ensemble_metrics": {
+    "mean_reward": 0.0,
+    "std_reward": 0.0,
+    "min_reward": 0.0,
+    "max_reward": 0.0,
+    "median_reward": 0.0,
+    "n_episodes": 5
+  },
+  "timestamp": "2026-02-09T23:08:37.478695"
+}

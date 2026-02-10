@@ -315,7 +315,48 @@ def simple_pipeline(df: pd.DataFrame, assets: Optional[List[str]] = None) -> Dic
         results_mgr.save_model(agent.model, agent_name.lower(), metrics)
     
     logger.info("✓ Models and metrics saved to results/")
+    # Visualização
+    logger.info("\nGerando visualizações...")
     
+    # 1. Executar um episódio completo no ambiente de teste para gerar o histórico
+    obs, _ = test_env.reset()
+    done = False
+    while not done:
+        # Usa o ensemble para decidir (modo determinístico para gráfico limpo)
+        action, _ = ensemble.predict(obs, deterministic=True)
+        obs, _, terminated, truncated, _ = test_env.step(action)
+        done = terminated or truncated
+    # 2. Criar DataFrame com o histórico de 'account_value'
+    # O asset_memory tem o valor inicial + valor a cada dia. Ajustamos o tamanho.
+    account_memory = test_env.asset_memory
+    dates = test_env.df['date'].values if 'date' in test_env.df.columns else test_env.df.index
+    
+    # Garantir que os tamanhos batem (pode haver deslocamento de 1 dia pelo valor inicial)
+    if len(account_memory) > len(dates):
+        account_memory = account_memory[:len(dates)]
+    
+    df_visualizacao = pd.DataFrame({
+        'date': dates[:len(account_memory)],
+        'account_value': account_memory
+    })
+    # 3. Gerar e Salvar os Gráficos
+    visualizer = TradingVisualizer()
+    # Gráfico de Valor do Portfólio
+    fig_portfolio = visualizer.plot_portfolio_value(df_visualizacao, title="Evolução do Patrimônio - Teste")
+    results_mgr.save_plot(fig_portfolio, 'equity_curve')
+    # Gráfico de Drawdown (Picos de queda)
+    returns = df_visualizacao['account_value'].pct_change().dropna()
+    fig_drawdown = visualizer.plot_drawdown(returns)
+    results_mgr.save_plot(fig_drawdown, 'drawdown_underwater')
+    # Comparativo de Métricas (Barras)
+    metrics_dict = {
+        'PPO': ppo_metrics, 'DDPG': ddpg_metrics, 
+        'A2C': a2c_metrics, 'Ensemble': ensemble_metrics
+    }
+    fig_metrics = visualizer.plot_metrics_comparison(metrics_dict)
+    results_mgr.save_plot(fig_metrics, 'metrics_comparison')
+    
+    logger.info("✓ Gráficos gerados e salvos em results/plots/")
     return complete_results
 
 
@@ -491,6 +532,49 @@ def rolling_window_ensemble(
     results_mgr.save_metrics_dataframe(df_results, 'rolling_ensemble_windows')
     
     logger.info("✓ Rolling window results saved to results/")
+    
+    # Visualização
+    logger.info("\nGerando visualizações...")
+    
+    # 1. Executar um episódio completo no ambiente de teste para gerar o histórico
+    obs, _ = test_env.reset()
+    done = False
+    while not done:
+        # Usa o ensemble para decidir (modo determinístico para gráfico limpo)
+        action, _ = ensemble.predict(obs, deterministic=True)
+        obs, _, terminated, truncated, _ = test_env.step(action)
+        done = terminated or truncated
+    # 2. Criar DataFrame com o histórico de 'account_value'
+    # O asset_memory tem o valor inicial + valor a cada dia. Ajustamos o tamanho.
+    account_memory = test_env.asset_memory
+    dates = test_env.df['date'].values if 'date' in test_env.df.columns else test_env.df.index
+    
+    # Garantir que os tamanhos batem (pode haver deslocamento de 1 dia pelo valor inicial)
+    if len(account_memory) > len(dates):
+        account_memory = account_memory[:len(dates)]
+    
+    df_visualizacao = pd.DataFrame({
+        'date': dates[:len(account_memory)],
+        'account_value': account_memory
+    })
+    # 3. Gerar e Salvar os Gráficos
+    visualizer = TradingVisualizer()
+    # Gráfico de Valor do Portfólio
+    fig_portfolio = visualizer.plot_portfolio_value(df_visualizacao, title="Evolução do Patrimônio - Teste")
+    results_mgr.save_plot(fig_portfolio, 'equity_curve')
+    # Gráfico de Drawdown (Picos de queda)
+    returns = df_visualizacao['account_value'].pct_change().dropna()
+    fig_drawdown = visualizer.plot_drawdown(returns)
+    results_mgr.save_plot(fig_drawdown, 'drawdown_underwater')
+    # Comparativo de Métricas (Barras)
+    metrics_dict = {
+        'PPO': ppo_metrics, 'DDPG': ddpg_metrics, 
+        'A2C': a2c_metrics, 'Ensemble': ensemble_metrics
+    }
+    fig_metrics = visualizer.plot_metrics_comparison(metrics_dict)
+    results_mgr.save_plot(fig_metrics, 'metrics_comparison')
+    
+    logger.info("✓ Gráficos gerados e salvos em results/plots/")
     
     return complete_results
 

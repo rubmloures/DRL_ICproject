@@ -148,8 +148,8 @@ ENSEMBLE_CONFIG = {
 # PINN Configuration (Physics-Informed Neural Networks - Heston Model)
 # =============================================================================
 PINN_ENABLED = True
-PINN_CHECKPOINT_PATH = str(PROJECT_ROOT / "repo_contex" / "PINN" / "resultados" / "modelo_final" / "best_hybrid_model.pth")
-PINN_DATA_STATS_PATH = str(PROJECT_ROOT / "repo_contex" / "PINN" / "resultados" / "modelo_final" / "data_stats.json")
+PINN_CHECKPOINT_PATH = str(PROJECT_ROOT / "trained_models" / "pinn_features" / "best_model_weights.pth")
+PINN_DATA_STATS_PATH = str(PROJECT_ROOT / "trained_models" / "pinn_features" / "data_stats.json")
 PINN_WINDOW_SIZE = 30                   # 30-day sliding window for LSTM
 PINN_BATCH_SIZE_INFERENCE = 256         # Batch size for PINN inference
 PINN_DEVICE = "cuda"                    # 'cuda' or 'cpu'
