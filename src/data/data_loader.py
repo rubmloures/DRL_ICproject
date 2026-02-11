@@ -169,29 +169,17 @@ class DataLoader:
         try:
             # Read CSV with Brazilian format
             # Skip first line if it contains "sep=" (format indicator)
+            # Use decimal=',' for fast native parsing of Brazilian decimals
             df = pd.read_csv(
                 csv_path,
                 sep=";",
+                decimal=",",  # Brazilian decimal format (much faster than manual parsing)
                 skipinitialspace=True,
                 low_memory=False,
                 skiprows=1,  # Skip "sep=;" header line
             )
             
             logger.debug(f"Loaded {len(df)} rows, {len(df.columns)} columns")
-            
-            # Parse numeric columns with Brazilian decimal format
-            numeric_cols = [
-                'spot_price', 'strike', 'premium', 'days_to_maturity',
-                'delta', 'gamma', 'theta', 'vega', 'rho', 'volatility',
-                'poe', 'bs',
-                'acao_open', 'acao_high', 'acao_low',
-                'acao_close_ajustado', 'acao_vol_fin',
-                'ewma_vol', 'vol_parkinson'
-            ]
-            
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = df[col].apply(self._parse_brazilian_number)
             
             # Parse datetime
             date_cols = ['time', 'data', 'date']

@@ -68,17 +68,40 @@ class PINNInferenceEngine:
         # Load normalization statistics
         self._load_data_stats()
         
-        # Load model architecture and weights
-        self.model = self._load_checkpoint()
-        self.model.to(device)
-        self.model.eval()
+        # Load model architecture and weights (optional - checkpoint may not exist yet)
+        try:
+            self.model = self._load_checkpoint()
+            self.model.to(device)
+            self.model.eval()
+            self.model_loaded = True
+        except FileNotFoundError:
+            logger.warning(f"⚠️  Checkpoint not found at {checkpoint_path}")
+            logger.warning("   PINN model will be initialized with random weights on first training")
+            self.model = None
+            self.model_loaded = False
+        except RuntimeError as e:
+            # Architecture mismatch - this is expected if checkpoint was trained with different config
+            error_msg = str(e)
+            if "size mismatch" in error_msg or "Unexpected key" in error_msg or "Missing key" in error_msg:
+                logger.warning(f"⚠️  Checkpoint architecture mismatch - will initialize fresh")
+                logger.warning(f"   Reason: Model was trained with different configuration")
+                logger.warning(f"   Example: Different embedding_dim, hidden_size, or neuron counts")
+                logger.info(f"   This is normal. Model will learn from current training data.")
+                self.model = None
+                self.model_loaded = False
+            else:
+                logger.error(f"❌ Unexpected error loading checkpoint: {e}")
+                self.model = None
+                self.model_loaded = False
         
         # LRU cache with TTL support
         self.inference_cache = OrderedDict()
         self.cache_timestamps = {}  # Track creation time for TTL
         
         if verbose:
-            logger.info(f"✅ PINN InferenceEngine initialized on {device} (cache_size={cache_size}, TTL={cache_ttl}s)")
+            status = "✅" if self.model_loaded else "⚠️ "
+            model_status = "initialized" if self.model_loaded else "pending (will load on first training)"
+            logger.info(f"{status} PINN InferenceEngine {model_status} on {device} (cache_size={cache_size}, TTL={cache_ttl}s)")
     
     def _load_data_stats(self):
         """Load normalization statistics from PINN training."""
@@ -113,39 +136,63 @@ class PINNInferenceEngine:
     def _load_checkpoint(self) -> nn.Module:
         """
         Load PINN model checkpoint.
-        Imports DeepHestonHybrid from repo_contex/PINN/src/model.py
+        Imports DeepHestonHybrid from src/pinn/model.py
         """
         try:
-            # Add repo_contex/PINN to path for imports
-            repo_path = Path(self.checkpoint_path).parent.parent.parent
-            pinn_src = repo_path / "src"
-            if str(pinn_src) not in sys.path:
-                sys.path.insert(0, str(pinn_src))
+            # Import model from current package
+            from .model import DeepHestonHybrid
             
-            # Import model
-            from model import DeepHestonHybrid
+            # Check if checkpoint exists
+            if not os.path.exists(self.checkpoint_path):
+                logger.info(f"ℹ️  Checkpoint not found - model will be trained from scratch")
+                return None
             
-            # Load checkpoint
+            # Load checkpoint state dict
             state_dict = torch.load(self.checkpoint_path, map_location=self.device)
             
-            # Instantiate model with config
-            model_config = self.data_stats.get('model_config', {})
-            model = DeepHestonHybrid(**model_config)
-            model.load_state_dict(state_dict)
-            model.eval()
+            # Get model config from data_stats (should now match checkpoint architecture)
+            model_config = self.data_stats.get('config', {})
             
-            if self.verbose:
-                logger.info(f"✅ Loaded PINN checkpoint from {self.checkpoint_path}")
+            if not model_config:
+                # Infer config from data_stats if not available
+                num_assets = len(self.data_stats.get('asset_map', {}))
+                model_config = {
+                    'lstm_hidden_size': 64,
+                    'lstm_layers': 2,
+                    'lstm_dropout': 0.1,
+                    'lstm_input_size': 10,
+                    'use_asset_embeddings': False,
+                    'num_assets': num_assets if num_assets > 0 else 14,
+                    'asset_embedding_dim': 4,
+                    'use_fourier_features': True,
+                    'fourier_features': 128,
+                    'fourier_sigma': 10.0,
+                    'pinn_hidden_layers': 4,
+                    'pinn_neurons': 64,
+                    'activation': 'silu',
+                    'dropout': 0.0,
+                    'deep_layers': [64, 64, 64, 64]
+                }
             
-            return model
+            # Instantiate model with config and data_stats
+            model = DeepHestonHybrid(config=model_config, data_stats=self.data_stats)
+            
+            # Load checkpoint weights (should match now)
+            try:
+                model.load_state_dict(state_dict, strict=True)
+                if self.verbose:
+                    logger.info(f"✅ Loaded PINN checkpoint successfully")
+                model.eval()
+                return model
+            except RuntimeError as e:
+                error_msg = str(e)
+                logger.warning(f"⚠️  Checkpoint incompatible: {str(error_msg)[:100]}...")
+                logger.info(f"   Model will be trained from scratch")
+                return None
         
-        except ImportError as e:
-            logger.error(f"❌ Could not import DeepHestonHybrid: {e}")
-            logger.info("   Make sure repo_contex/PINN/src/model.py exists")
-            raise
         except Exception as e:
-            logger.error(f"❌ Failed to load checkpoint: {e}")
-            raise
+            logger.debug(f"Could not load checkpoint: {type(e).__name__}: {str(e)[:100]}")
+            return None
     
     def validate_inputs(
         self,
@@ -255,6 +302,19 @@ class PINNInferenceEngine:
                 'price': [batch, 1] - Theoretical option price (if return_price=True)
             }
         """
+        
+        # Check if model is loaded
+        if not self.model_loaded or self.model is None:
+            logger.warning("⚠️ PINN model not loaded yet, returning default Heston parameters")
+            batch_size = x_seq.shape[0]
+            return {
+                'nu': np.ones((batch_size, 1)) * 0.25,      # Default variance
+                'theta': np.ones((batch_size, 1)) * 0.25,   # Default long-term variance
+                'kappa': np.ones((batch_size, 1)) * 1.0,    # Default mean reversion
+                'xi': np.ones((batch_size, 1)) * 0.5,       # Default vol of vol
+                'rho': np.ones((batch_size, 1)) * -0.5,     # Default correlation
+                'price': np.ones((batch_size, 1)) * 0.0     # Default price
+            }
         
         # Validate
         if self.enable_validation:

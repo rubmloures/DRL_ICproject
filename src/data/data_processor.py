@@ -83,8 +83,13 @@ class DataProcessor:
         
         Uses pandas_ta library if available, otherwise falls back to manual calculation.
         
+        Supports multiple column naming schemes:
+        - Original: acao_open, acao_high, acao_low, acao_close_ajustado, acao_vol_fin
+        - Aggregated: spot_price_mean/min/max, close (from aggregation)
+        - Merged: open, high, low, close, volume (post-merge)
+        
         Args:
-            df: DataFrame with OHLCV columns
+            df: DataFrame with OHLCV columns (any naming scheme)
             include_indicators: List of indicators to add (default: all)
         
         Returns:
@@ -100,8 +105,12 @@ class DataProcessor:
                 'volume_sma_20'
             ]
         
-        # Identify OHLCV columns
-        ohlcv_map = {
+        # ========================================================================
+        # PHASE 1: Identify OHLCV columns (try multiple naming schemes)
+        # ========================================================================
+        
+        # Scheme 1: Original B3 naming
+        ohlcv_map_original = {
             'acao_open': 'open',
             'acao_high': 'high',
             'acao_low': 'low',
@@ -109,11 +118,56 @@ class DataProcessor:
             'acao_vol_fin': 'volume',
         }
         
-        available_renames = {k: v for k, v in ohlcv_map.items() if k in df.columns}
+        # Scheme 2: After options aggregation (spot_price_* columns)
+        ohlcv_map_aggregated = {
+            'spot_price_max': 'high',      # High: max of spot prices
+            'spot_price_min': 'low',       # Low: min of spot prices
+            'spot_price_mean': 'close',    # Close: mean of spot prices
+        }
+        
+        # Scheme 3: Already standardized (open, high, low, close, volume)
+        if 'open' in df.columns and 'close' in df.columns:
+            available_renames = {}
+            if 'open' not in df.columns:
+                df['open'] = df.get('close', df.iloc[:, 0])
+            if 'high' not in df.columns:
+                df['high'] = df.get('spot_price_max', df.get('close', df.iloc[:, 0]))
+            if 'low' not in df.columns:
+                df['low'] = df.get('spot_price_min', df.get('close', df.iloc[:, 0]))
+            if 'volume' not in df.columns:
+                df['volume'] = df.get('acao_vol_fin_mean', 1.0)
+        else:
+            # Try scheme 1 (original B3 naming)
+            available_renames = {k: v for k, v in ohlcv_map_original.items() if k in df.columns}
+            
+            # If not found, try scheme 2 (aggregated spot_price_*)
+            if not available_renames:
+                available_renames = {k: v for k, v in ohlcv_map_aggregated.items() if k in df.columns}
+                
+                # Ensure we have all required columns with fallbacks
+                if 'spot_price_mean' in df.columns or 'close' in df.columns:
+                    close_col = 'close' if 'close' in df.columns else 'spot_price_mean'
+                    high_col = 'spot_price_max' if 'spot_price_max' in df.columns else close_col
+                    low_col = 'spot_price_min' if 'spot_price_min' in df.columns else close_col
+                    vol_col = 'acao_vol_fin_mean' if 'acao_vol_fin_mean' in df.columns else 'volume'
+                    
+                    available_renames = {
+                        close_col: 'close',
+                        high_col: 'high',
+                        low_col: 'low',
+                        vol_col: 'volume'
+                    }
+                    # Remove duplicates (fallback might cause duplicates)
+                    available_renames = {k: v for k, v in available_renames.items() if k in df.columns}
         
         if not available_renames:
-            logger.warning("No OHLCV columns found. Skipping technical indicators.")
+            logger.warning(
+                f"No OHLCV columns found. Available: {list(df.columns)[:10]}... "
+                "Skipping technical indicators."
+            )
             return df
+        
+        logger.info(f"Detected OHLCV columns: {list(available_renames.keys())}")
         
         df_ta = df.rename(columns=available_renames)
         
@@ -320,12 +374,13 @@ class DataProcessor:
         Aggregate options data to daily summaries (for PINN features).
         
         Creates mean/std of Greeks across all options per day.
+        CRITICAL: Preserves spot_price_mean/min/max for technical indicators.
         
         Args:
             df: Options data with Greeks and time column
         
         Returns:
-            Daily aggregated DataFrame
+            Daily aggregated DataFrame with OHLCV-like structure
         """
         df = df.copy()
         
@@ -361,7 +416,33 @@ class DataProcessor:
         
         daily['date'] = pd.to_datetime(daily['date'])
         
+        # ========================================================================
+        # CRITICAL: Ensure we have close price for technical indicators
+        # ========================================================================
+        # After aggregation, we have: spot_price_mean, spot_price_std, spot_price_min, spot_price_max
+        # add_technical_indicators() looks for 'close', 'open', 'high', 'low'
+        # Solution: Create these columns as aliases
+        if 'spot_price_mean' in daily.columns:
+            daily['close'] = daily['spot_price_mean']  # Close = mean spot price
+        
+        if 'spot_price_max' in daily.columns:
+            daily['high'] = daily['spot_price_max']    # High = max spot price
+        
+        if 'spot_price_min' in daily.columns:
+            daily['low'] = daily['spot_price_min']     # Low = min spot price
+        
+        # Open: use close (no separate open for options data)
+        if 'close' in daily.columns and 'open' not in daily.columns:
+            daily['open'] = daily['close']
+        
+        # Volume: use acao_vol_fin_mean if available, else 1.0
+        if 'acao_vol_fin_mean' in daily.columns:
+            daily['volume'] = daily['acao_vol_fin_mean']
+        elif 'volume' not in daily.columns:
+            daily['volume'] = 1.0
+        
         logger.info(f"Aggregated to {len(daily)} daily records")
+        logger.info(f"  OHLCV columns created: open, high, low, close, volume")
         return daily
     
     @staticmethod

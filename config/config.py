@@ -58,9 +58,9 @@ VAL_END = "2025-12-31"         # ← Validation in 2025
 # Strategy: 14 weeks training, 4 weeks testing, 2 weeks overlap
 # With K-fold validation inside each train window
 ROLLING_WINDOW_CONFIG = {
-    'train_weeks': 14,              # ~14 * 5 = 70 trading days
+    'train_weeks': 52,              # ~52 * 5 = 260 trading days (1 year)
     'test_weeks': 4,                # ~4 * 5 = 20 trading days
-    'overlap_weeks': 2,             # Overlap between consecutive windows
+    'overlap_weeks': 4,             # Overlap between consecutive windows
     'enabled': True,                # Enable rolling window strategy
     'with_validation_fold': True,   # Enable K-fold validation inside train
     'k_fold': 3,                    # Number of folds for cross-validation
@@ -148,8 +148,8 @@ ENSEMBLE_CONFIG = {
 # PINN Configuration (Physics-Informed Neural Networks - Heston Model)
 # =============================================================================
 PINN_ENABLED = True
-PINN_CHECKPOINT_PATH = str(PROJECT_ROOT / "trained_models" / "pinn_features" / "best_model_weights.pth")
-PINN_DATA_STATS_PATH = str(PROJECT_ROOT / "trained_models" / "pinn_features" / "data_stats.json")
+PINN_CHECKPOINT_PATH = str(PROJECT_ROOT / "src" / "pinn" / "weights" /"best_model_weights.pth")
+PINN_DATA_STATS_PATH = str(PROJECT_ROOT / "src" / "pinn" / "weights" / "data_stats.json")
 PINN_WINDOW_SIZE = 30                   # 30-day sliding window for LSTM
 PINN_BATCH_SIZE_INFERENCE = 256         # Batch size for PINN inference
 PINN_DEVICE = "cuda"                    # 'cuda' or 'cpu'

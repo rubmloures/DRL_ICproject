@@ -24,9 +24,14 @@ import sys
 from datetime import datetime
 import argparse
 
+# Optional torch for PINN support
+try:
+    import torch
+except ImportError:
+    torch = None
+
 sys.path.insert(0, str(Path(__file__).parent))
 
-# ⭐ REPRODUCIBILITY: Set seeds FIRST before any other imports
 from src.core.reproducibility import set_all_seeds, assert_reproducible
 from src.core.validation import validate_input_safety
 
@@ -52,6 +57,13 @@ from src.optimization.hyperparameter_optimizer import HyperparameterOptimizer
 from src.evaluation.results_manager import ResultsManager
 from src.evaluation.visualization import TradingVisualizer
 
+# Setup logging - MUST BE BEFORE PINN IMPORT
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Optional PINN support
 try:
     from src.pinn.inference_wrapper import PINNInferenceEngine
@@ -66,24 +78,211 @@ except ImportError as e:
         logger.error("PINN_ENABLED=True mas módulo indisponível. Abortando!")
         sys.exit(1)
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
 
 def setup_directories() -> None:
     """Create necessary output directories."""
     for directory in [DATA_PROCESSED, TRAINED_MODELS, RESULTS]:
         directory.mkdir(parents=True, exist_ok=True)
-        logger.info(f"✓ {directory}")
+        logger.info(f" {directory}")
+
+
+def load_raw_options_data(assets: List[str] = None) -> Dict[str, pd.DataFrame]:
+    """
+    Load raw options data (multiple rows per asset per day).
+    
+    Returns a dict mapping each asset to its options chain with proper indexing:
+    - Index: (date, asset)
+    - Columns: strike, premium, spot_price, delta, gamma, theta, vega, rho, days_to_maturity, ...
+    
+    Parameters
+    ----------
+    assets : list, optional
+        Assets to load (default: PRIMARY_ASSETS)
+    
+    Returns
+    -------
+    Dict[str, pd.DataFrame]
+        DataFrame per asset with multi-level index (date, asset) for PINN
+    """
+    logger.info("\n" + "="*70)
+    logger.info("STEP 1: Loading Raw Options Data (For PINN Inference)")
+    logger.info("="*70)
+    
+    if assets is None:
+        assets = PRIMARY_ASSETS
+    
+    loader = DataLoader(data_path=DATA_RAW)
+    options_data = {}
+    
+    for asset_name in assets:
+        logger.info(f"Loading {asset_name} options chain...")
+        try:
+            df = loader.load_asset(asset_name)
+            
+            # Keep all rows (multiple strikes per day)
+            # Ensure date column exists
+            date_col = next((c for c in ['time', 'date', 'data'] if c in df.columns), None)
+            if not date_col:
+                logger.warning(f"  No date column in {asset_name}. Skipping.")
+                continue
+            
+            # Standardize to 'date'
+            df = df.rename(columns={date_col: 'date'})
+            df['date'] = pd.to_datetime(df['date']).dt.date
+            df['asset'] = asset_name
+            
+            # Set multi-level index: (date, asset)
+            df = df.set_index(['date', 'asset'])
+            df = df.sort_index()
+            
+            options_data[asset_name] = df
+            logger.info(f"  ✓ Loaded {len(df)} option rows for {asset_name}")
+            
+        except Exception as e:
+            logger.warning(f"  Error loading {asset_name}: {e}")
+            continue
+    
+    return options_data
+
+
+def prepare_pinn_dataset(options_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """
+    Prepare dataset for PINN inference.
+    
+    Combines all options data into single DataFrame with (date, asset) multi-index.
+    This ensures that when we create 30-day sliding windows:
+    - We get windows of 30 days for EACH asset independently
+    - NOT confused with 30 different assets on same day
+    
+    Parameters
+    ----------
+    options_data : Dict[str, pd.DataFrame]
+        Options data per asset from load_raw_options_data()
+    
+    Returns
+    -------
+    pd.DataFrame
+        Combined options data with multi-index (date, asset)
+    """
+    logger.info("\n" + "="*70)
+    logger.info("STEP 1b: Preparing PINN Dataset (Multi-Index by Date & Asset)")
+    logger.info("="*70)
+    
+    # Concatenate all assets
+    pinn_df = pd.concat(options_data.values(), axis=0)
+    pinn_df = pinn_df.sort_index()  # Sort by (date, asset)
+    
+    logger.info(f"✓ PINN Dataset ready: {len(pinn_df)} total option records")
+    logger.info(f"  Unique dates: {pinn_df.index.get_level_values(0).nunique()}")
+    logger.info(f"  Unique assets: {pinn_df.index.get_level_values(1).nunique()}")
+    
+    return pinn_df
+
+
+def prepare_drl_dataset(options_data: Dict[str, pd.DataFrame], processor: DataProcessor) -> pd.DataFrame:
+    """
+    Prepare dataset for DRL environment.
+    
+    From options chains, extract:
+    1. Daily spot price (OHLCV: open, high, low, close, volume)
+    2. Technical indicators (SMA, RSI, MACD, etc.)
+    3. Greeks mean/std per day (delta, gamma, theta, vega, rho)
+    
+    Result: One row per asset per day, columns prefixed by stock_i_*
+    
+    Parameters
+    ----------
+    options_data : Dict[str, pd.DataFrame]
+        Options data per asset from load_raw_options_data()
+    processor : DataProcessor
+        Data processor for technical indicators
+    
+    Returns
+    -------
+    pd.DataFrame
+        Wide-format daily data: index=date, columns=[stock_0_close, stock_1_close, ...]
+    """
+    logger.info("\n" + "="*70)
+    logger.info("STEP 2: Preparing DRL Dataset (Daily OHLCV + Technicals + Greeks)")
+    logger.info("="*70)
+    
+    combined_drl = pd.DataFrame()
+    
+    for i, (asset_name, df_options) in enumerate(options_data.items()):
+        logger.info(f"\nProcessing Asset {i+1}/{len(options_data)}: {asset_name}")
+        
+        # Reset index to access date and asset columns
+        df = df_options.reset_index()
+        
+        # Aggregate to daily (mean/std of spot_price, Greeks, etc.)
+        daily_groups = []
+        for date, group in df.groupby('date'):
+            daily_record = {'date': date}
+            
+            # Spot price (OHLCV)
+            if 'spot_price' in group.columns:
+                daily_record['open'] = group['spot_price'].iloc[0] if len(group) > 0 else np.nan
+                daily_record['high'] = group['spot_price'].max()
+                daily_record['low'] = group['spot_price'].min()
+                daily_record['close'] = group['spot_price'].iloc[-1] if len(group) > 0 else np.nan
+            
+            # Volume
+            if 'acao_vol_fin' in group.columns:
+                daily_record['volume'] = group['acao_vol_fin'].sum()
+            else:
+                daily_record['volume'] = len(group)  # Fallback: number of options
+            
+            # Greeks (mean and std)
+            for greek in ['delta', 'gamma', 'theta', 'vega', 'rho']:
+                if greek in group.columns:
+                    daily_record[f'{greek}_mean'] = group[greek].mean()
+                    daily_record[f'{greek}_std'] = group[greek].std()
+            
+            daily_groups.append(daily_record)
+        
+        df_daily = pd.DataFrame(daily_groups)
+        logger.info(f"  Aggregated {len(df)} option rows → {len(df_daily)} daily records")
+        
+        # Add technical indicators
+        df_daily = processor.clean_data(df_daily)
+        df_daily = processor.add_technical_indicators(df_daily)
+        
+        # Rename columns with asset prefix
+        prefix = f"stock_{i}_"
+        rename_map = {c: f"{prefix}{c}" for c in df_daily.columns if c != 'date'}
+        df_daily = df_daily.rename(columns=rename_map)
+        
+        # Merge into combined
+        if combined_drl.empty:
+            combined_drl = df_daily
+        else:
+            combined_drl = pd.merge(combined_drl, df_daily, on='date', how='inner')
+    
+    # Sort and set date as index
+    combined_drl = combined_drl.sort_values('date').reset_index(drop=True)
+    combined_drl['date'] = pd.to_datetime(combined_drl['date'])
+    combined_drl['data'] = combined_drl['date']  # Alias
+    combined_drl['time'] = combined_drl['date']  # Alias
+    
+    logger.info(f"\n✓ DRL Dataset ready: {len(combined_drl)} trading days")
+    logger.info(f"  Columns: {len(combined_drl.columns)}")
+    
+    return combined_drl, options_data
 
 
 def load_and_preprocess_data(assets: List[str] = None) -> pd.DataFrame:
     """
-    Load raw data and preprocess.
+    DEPRECATED: Use load_raw_options_data() + prepare_drl_dataset() instead.
+    
+    Kept for backward compatibility.
+    
+    Load raw data, process individually, and merge into a Wide-Format DataFrame.
+    
+    Transformation:
+    1. Loads each asset (PETR4, VALE3...)
+    2. Filters Options Data -> Underlying Spot Price (1 row per day)
+    3. Adds Technical Indicators per asset
+    4. Merges into a single DataFrame: index=Date, columns=[stock_0_close, stock_1_close...]
     
     Parameters
     ----------
@@ -93,43 +292,104 @@ def load_and_preprocess_data(assets: List[str] = None) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Processed data with technical indicators
+        Wide-format processed data suitable for multi-agent environment.
     """
     logger.info("\n" + "="*70)
-    logger.info("STEP 1: Data Loading and Preprocessing")
+    logger.info("STEP 1: Data Loading and Preprocessing (Wide-Format)")
     logger.info("="*70)
     
     if assets is None:
         assets = PRIMARY_ASSETS
     
-    # Load data
-    logger.info(f"Loading {len(assets)} assets...")
     loader = DataLoader(data_path=DATA_RAW)
-    
-    try:
-        df = loader.load_multiple_assets(assets)
-        logger.info(f"✓ Loaded {len(df)} records from {len(assets)} assets")
-    except FileNotFoundError as e:
-        logger.error(f"✗ {e}")
-        logger.error("Please ensure CSV files exist in data/raw/")
-        raise
-    
-    # Preprocess
-    logger.info("Preprocessing data...")
     processor = DataProcessor()
-    df = processor.clean_data(df)
-    df = processor.add_technical_indicators(df)
     
-    # Fill NaN values from technical indicators (SMA, RSI, etc.)
-    # Initial rows will have NaN because indicators need warmup
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    for col in numeric_cols:
-        if df[col].isna().any():
-            df[col] = df[col].ffill().bfill()
+    combined_df = pd.DataFrame()
     
-    logger.info(f"✓ Processed: {len(df)} rows, {len(df.columns)} columns")
+    for i, asset_name in enumerate(assets):
+        logger.info(f"Processing Asset {i+1}/{len(assets)}: {asset_name}...")
+        
+        try:
+            # 1. Load individual asset
+            df = loader.load_asset(asset_name)
+            
+            # 2. Handle Options Data (Reduce 600+ rows/day to 1 row/day)
+            # Check for characteristic options columns
+            if 'strike' in df.columns and 'type' in df.columns and 'spot_price' in df.columns:
+                logger.info(f"  -> Detected Options Chain for {asset_name}. Aggregating to Daily Market View...")
+                
+                # Use DataProcessor's aggregation to preserve Greeks (mean/std) and extract Spot Price
+                # This ensures PINN gets 'delta_mean', 'gamma_mean' etc., while DRL gets 'spot_price_mean' (close)
+                df_daily = processor.aggregate_daily_options(df)
+                
+                # Remap columns to standard OHLCV for Technical Indicators
+                
+                # 1. Close Price: Use 'spot_price_mean' (aggregated) or 'spot_price' if flat
+                if 'spot_price_mean' in df_daily.columns:
+                    df_daily['close'] = df_daily['spot_price_mean']
+                elif 'spot_price' in df_daily.columns:
+                    df_daily['close'] = df_daily['spot_price']
+                
+                # 2. Volume: Use 'acao_vol_fin_mean' or default
+                if 'acao_vol_fin_mean' in df_daily.columns:
+                    df_daily['volume'] = df_daily['acao_vol_fin_mean']
+                else:
+                    df_daily['volume'] = 1.0
+                
+                # Keep original data primarily
+                df = df_daily
+                logger.info(f"  -> Reduced to {len(df)} daily records (aggregated).")
+            
+            # 3. Clean and Add Features (Per Asset)
+            df = processor.clean_data(df)
+            df = processor.add_technical_indicators(df)
+            
+            # 4. Rename Columns with Prefix (stock_0_, stock_1_...)
+            # This is CRITICAL for the Environment to distinguish assets
+            prefix = f"stock_{i}_"
+            
+            # Identify the date column to preserve it from prefixing
+            date_col = next((c for c in ['date', 'time', 'data'] if c in df.columns), None)
+            if not date_col:
+                raise ValueError("Date column lost during processing")
+            
+            # Rename all except date
+            rename_map = {c: f"{prefix}{c}" for c in df.columns if c != date_col}
+            df = df.rename(columns=rename_map)
+            
+            # Standardize date column name for merging
+            df = df.rename(columns={date_col: 'date'})
+            
+            # 5. Merge into Combined DataFrame
+            if combined_df.empty:
+                combined_df = df
+            else:
+                # Merge on Date (Inner Join to ensure alignment)
+                combined_df = pd.merge(combined_df, df, on='date', how='inner')
+        
+        except FileNotFoundError:
+            logger.error(f"  x File for {asset_name} not found. Skipping.")
+            continue
+        except Exception as e:
+            logger.error(f"  x Error processing {asset_name}: {e}")
+            raise
+            
+    # Final check
+    if combined_df.empty:
+        raise ValueError("No data loaded. Aborting.")
     
-    return df
+    # Sort by date
+    combined_df = combined_df.sort_values('date').reset_index(drop=True)
+    
+    # Determine the 'data' (date) column for RollingWindowStrategy
+    # It expects 'data' or 'date'. We have 'date'.
+    combined_df['data'] = combined_df['date'] # Alias for compatibility
+    combined_df['time'] = combined_df['date'] # Alias for validation compatibility
+    
+    logger.info(f" Final Wide-Format Dataset: {len(combined_df)} trading days, {len(combined_df.columns)} columns")
+    logger.info(f"  Assets processed: {len(assets)}")
+    
+    return combined_df
 
 
 def simple_pipeline(df: pd.DataFrame, assets: Optional[List[str]] = None) -> Dict:
@@ -176,7 +436,7 @@ def simple_pipeline(df: pd.DataFrame, assets: Optional[List[str]] = None) -> Dic
         sell_cost_pct=TRANSACTION_COST,
     )
     
-    logger.info("✓ Environments created")
+    logger.info(" Environments created")
     
     # Setup checkpointing and timeouts
     checkpoint_dir = TRAINED_MODELS / "checkpoints"
@@ -314,7 +574,7 @@ def simple_pipeline(df: pd.DataFrame, assets: Optional[List[str]] = None) -> Dic
         metrics = complete_results.get(f'{agent_name.lower()}_metrics', {})
         results_mgr.save_model(agent.model, agent_name.lower(), metrics)
     
-    logger.info("✓ Models and metrics saved to results/")
+    logger.info(" Models and metrics saved to results/")
     # Visualização
     logger.info("\nGerando visualizações...")
     
@@ -356,7 +616,7 @@ def simple_pipeline(df: pd.DataFrame, assets: Optional[List[str]] = None) -> Dic
     fig_metrics = visualizer.plot_metrics_comparison(metrics_dict)
     results_mgr.save_plot(fig_metrics, 'metrics_comparison')
     
-    logger.info("✓ Gráficos gerados e salvos em results/plots/")
+    logger.info(" Gráficos gerados e salvos em results/plots/")
     return complete_results
 
 
@@ -364,7 +624,8 @@ def rolling_window_ensemble(
     df: pd.DataFrame,
     pinn_engine: Optional[Any] = None,
     pinn_features_enabled: bool = False,
-    ab_testing_enabled: bool = False
+    ab_testing_enabled: bool = False,
+    results_prefix: str = ""
 ) -> Dict:
     """
     Production pipeline with rolling window cross-validation.
@@ -466,27 +727,88 @@ def rolling_window_ensemble(
                 'A2C': 1.0,
             })
         
+        # Evaluate ensemble performance (Reward)
         ensemble_metrics = ensemble.evaluate(n_episodes=3, env=test_env)
         
+        # ---------------------------------------------------------------------
+        # Detailed Evaluation for Metrics (Sharpe, Return, Drawdown)
+        # ---------------------------------------------------------------------
+        # Run one deterministic episode to get daily portfolio values
+        obs, _ = test_env.reset()
+        done = False
+        while not done:
+            action, _ = ensemble.predict(obs, deterministic=True)
+            obs, _, terminated, truncated, _ = test_env.step(action)
+            done = terminated or truncated
+            
+        # Extract portfolio history
+        portfolio_values = pd.Series(test_env.asset_memory)
+        daily_returns = portfolio_values.pct_change().dropna()
+        
+        # Calculate Metrics
+        if len(daily_returns) > 1:
+            # Sharpe (Annualized) - assuming 252 days
+            # If window is short, this is an approximation
+            sharpe = (daily_returns.mean() / daily_returns.std()) * np.sqrt(252) if daily_returns.std() > 1e-9 else 0.0
+            
+            # Cumulative Return
+            total_return = (portfolio_values.iloc[-1] / portfolio_values.iloc[0]) - 1.0
+            
+            # Annualized Return
+            days = len(portfolio_values)
+            annual_return = ((1 + total_return) ** (252 / days)) - 1.0 if days > 0 else 0.0
+            
+            # Max Drawdown
+            cumulative = (1 + daily_returns).cumprod()
+            peak = cumulative.cummax()
+            drawdown = (cumulative - peak) / peak
+            max_drawdown = drawdown.min()
+        else:
+            sharpe = 0.0
+            total_return = 0.0
+            annual_return = 0.0
+            max_drawdown = 0.0
+            
         # Store results
         result = {
             'window_idx': window_idx,
-            'ppo_sharpe': ppo_metrics['mean_reward'],
-            'ddpg_sharpe': ddpg_metrics['mean_reward'],
-            'a2c_sharpe': a2c_metrics['mean_reward'],
-            'ensemble_sharpe': ensemble_metrics['mean_reward'],
+            'ppo_reward': ppo_metrics['mean_reward'],
+            'ddpg_reward': ddpg_metrics['mean_reward'],
+            'a2c_reward': a2c_metrics['mean_reward'],
+            'ensemble_reward': ensemble_metrics['mean_reward'], # Still keep reward
+            
+            # Calculated Metrics
+            'ensemble_sharpe': sharpe,
+            'ensemble_total_return': total_return,
+            'ensemble_annual_return': annual_return,
+            'ensemble_max_drawdown': max_drawdown,
+            
+            'start_date': date_range['test_start'].date(),
+            'end_date': date_range['test_end'].date(),
         }
         window_results.append(result)
         
-        logger.info(f"PPO: {ppo_metrics['mean_reward']:.4f} | "
-                   f"DDPG: {ddpg_metrics['mean_reward']:.4f} | "
-                   f"A2C: {a2c_metrics['mean_reward']:.4f} | "
-                   f"Ensemble: {ensemble_metrics['mean_reward']:.4f}")
+        logger.info(f"Ensemble Metrics: Reward={ensemble_metrics['mean_reward']:.4f}, "
+                   f"Sharpe={sharpe:.4f}, Ann.Ret={annual_return:.2%}, MaxDD={max_drawdown:.2%}")
+
+        # Save Models for this window
+        window_save_dir = RESULTS / "models" / f"window_{window_idx}"
+        if results_prefix:
+            window_save_dir = RESULTS / "models" / f"{results_prefix}window_{window_idx}"
         
-        # Limit to 3 windows for demo
-        if window_idx >= 2:
-            logger.info("\n(Demo: limiting to 3 windows. Remove this in production.)")
-            break
+        window_save_dir.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            ensemble.save(window_save_dir / "ensemble_agent.zip")
+            ppo.save(window_save_dir / "ppo_agent.zip")
+            ddpg.save(window_save_dir / "ddpg_agent.zip")
+            a2c.save(window_save_dir / "a2c_agent.zip")
+            logger.info(f"Saved models to {window_save_dir}")
+        except Exception as e:
+            logger.error(f"Failed to save models for window {window_idx}: {e}")
+        
+        # Limit to 3 windows REMOVED for production
+        # if window_idx >= 2: ...
     
     # Aggregate results
     logger.info("\n" + "="*70)
@@ -495,21 +817,21 @@ def rolling_window_ensemble(
     
     aggregated = rolling.get_metrics_across_windows(window_results)
     
-    logger.info(f"\n{'Algorithm':<12} {'Avg Sharpe':<14} {'Std':<14}")
+    logger.info(f"\n{'Algorithm':<12} {'Avg Reward':<14} {'Std':<14}")
     logger.info("-"*40)
     
-    if 'avg_ppo_sharpe' in aggregated:
-        logger.info(f"{'PPO':<12} {aggregated['avg_ppo_sharpe']:>13.4f} "
-                   f"{aggregated['std_ppo_sharpe']:>13.4f}")
-    if 'avg_ddpg_sharpe' in aggregated:
-        logger.info(f"{'DDPG':<12} {aggregated['avg_ddpg_sharpe']:>13.4f} "
-                   f"{aggregated['std_ddpg_sharpe']:>13.4f}")
-    if 'avg_a2c_sharpe' in aggregated:
-        logger.info(f"{'A2C':<12} {aggregated['avg_a2c_sharpe']:>13.4f} "
-                   f"{aggregated['std_a2c_sharpe']:>13.4f}")
-    if 'avg_ensemble_sharpe' in aggregated:
-        logger.info(f"{'ENSEMBLE':<12} {aggregated['avg_ensemble_sharpe']:>13.4f} "
-                   f"{aggregated['std_ensemble_sharpe']:>13.4f}")
+    if 'avg_ppo_reward' in aggregated:
+        logger.info(f"{'PPO':<12} {aggregated['avg_ppo_reward']:>13.4f} "
+                   f"{aggregated['std_ppo_reward']:>13.4f}")
+    if 'avg_ddpg_reward' in aggregated:
+        logger.info(f"{'DDPG':<12} {aggregated['avg_ddpg_reward']:>13.4f} "
+                   f"{aggregated['std_ddpg_reward']:>13.4f}")
+    if 'avg_a2c_reward' in aggregated:
+        logger.info(f"{'A2C':<12} {aggregated['avg_a2c_reward']:>13.4f} "
+                   f"{aggregated['std_a2c_reward']:>13.4f}")
+    if 'avg_ensemble_reward' in aggregated:
+        logger.info(f"{'ENSEMBLE':<12} {aggregated['avg_ensemble_reward']:>13.4f} "
+                   f"{aggregated['std_ensemble_reward']:>13.4f}")
     
     logger.info(f"Total Windows: {aggregated['total_windows']}")
     
@@ -525,13 +847,13 @@ def rolling_window_ensemble(
     }
     
     # Save as JSON
-    results_mgr.save_metrics(complete_results, 'rolling_ensemble_metrics')
+    results_mgr.save_metrics(complete_results, f'{results_prefix}rolling_ensemble_metrics')
     
     # Save as CSV for easier analysis
     df_results = pd.DataFrame(window_results)
-    results_mgr.save_metrics_dataframe(df_results, 'rolling_ensemble_windows')
+    results_mgr.save_metrics_dataframe(df_results, f'{results_prefix}rolling_ensemble_windows')
     
-    logger.info("✓ Rolling window results saved to results/")
+    logger.info(" Rolling window results saved to results/")
     
     # Visualização
     logger.info("\nGerando visualizações...")
@@ -574,7 +896,7 @@ def rolling_window_ensemble(
     fig_metrics = visualizer.plot_metrics_comparison(metrics_dict)
     results_mgr.save_plot(fig_metrics, 'metrics_comparison')
     
-    logger.info("✓ Gráficos gerados e salvos em results/plots/")
+    logger.info(" Gráficos gerados e salvos em results/plots/")
     
     return complete_results
 
@@ -630,7 +952,7 @@ def optuna_pipeline(
         sell_cost_pct=TRANSACTION_COST,
     )
     
-    logger.info("✓ Environments created")
+    logger.info(" Environments created")
     
     # Initialize optimizer
     logger.info(f"\nInitializing Optuna optimizer for {agent_type}...")
@@ -697,7 +1019,7 @@ def optuna_pipeline(
         # Save best model
         results_mgr.save_model(agent.model, f'{agent_type.lower()}_optuna', metrics)
         
-        logger.info("✓ Optimization results and best model saved to results/")
+        logger.info(" Optimization results and best model saved to results/")
         
         return complete_results
     
@@ -706,6 +1028,232 @@ def optuna_pipeline(
         import traceback
         traceback.print_exc()
         return {'error': str(e)}
+
+
+def enrich_with_pinn_features(df: pd.DataFrame, assets: List[str]) -> pd.DataFrame:
+    """
+    Enrich DataFrame with Physics-Informed (PINN) features via Batch Inference.
+       
+    The PINN acts as a Market Regime Sensor that:
+    1. Takes sliding windows of real price data (30 days)
+    2. Calibrates Heston parameters (κ, θ, ξ, ρ) describing market physics
+    3. Returns these latent parameters as features for the DRL agent
+    
+    This replaces real-time inference in the environment, speeding up training by ~100x.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Wide-format processed data with columns like stock_0_close, stock_1_close, etc.
+    assets : List[str]
+        List of asset tickers
+        
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame enriched with columns: pinn_kappa, pinn_theta, pinn_xi, pinn_rho
+    """
+    logger.info("\n" + "="*70)
+    logger.info("STEP 1.5: PINN Feature Enrichment (Market Regime Sensor)")
+    logger.info("="*70)
+    logger.info("\nIntegration Architecture:")
+    logger.info("   REAL Data (30-day window) → PINN LSTM → Heston Params (κ,θ,ξ,ρ)")
+    logger.info("   These physics parameters enrich DRL agent observations")
+    
+    try:
+        from src.pinn.inference_wrapper import PINNInferenceEngine
+        from src.data.pinn_data_preprocessor import PINNDataPreprocessor
+    except ImportError as e:
+        logger.warning(f"PINN modules not found: {e}. Skipping enrichment.")
+        return df
+
+    # ========================================================================
+    # Path Resolution: Find trained PINN model
+    # ========================================================================
+    
+    # Primary path: PINN project
+    checkpoint_path = PROJECT_ROOT / "src" / "pinn" / "weights" /"best_model_weights.pth"
+    stats_path = PROJECT_ROOT / "src" / "pinn" / "weights" / "data_stats.json"
+    
+    # Fallback paths
+    if not checkpoint_path.exists():
+        checkpoint_path = PROJECT_ROOT / "src" / "pinn" / "weights" /"best_model_weights.pth"
+    if not stats_path.exists():
+        stats_path = PROJECT_ROOT / "src" / "pinn" / "weights" / "data_stats.json"
+        
+    if not checkpoint_path.exists() or not stats_path.exists():
+        logger.warning(f"⚠️  PINN model files not found:")
+        logger.warning(f"    Checkpoint: {checkpoint_path}")
+        logger.warning(f"    Stats: {stats_path}")
+        logger.warning("    Skipping PINN enrichment.")
+        return df
+
+    logger.info(f"\n Found PINN model: {checkpoint_path.name}")
+    
+    # ========================================================================
+    # Initialize PINN Engine
+    # ========================================================================
+    logger.info("Initializing PINN Inference Engine...")
+    try:
+        # Determine device (torch may be None if not installed)
+        device = "cuda" if (torch is not None and torch.cuda.is_available()) else "cpu"
+        engine = PINNInferenceEngine(
+            checkpoint_path=str(checkpoint_path),
+            data_stats_path=str(stats_path),
+            device=device,
+            enable_validation=False
+        )
+        
+        preprocessor = PINNDataPreprocessor(
+            data_stats_path=str(stats_path),
+            verbose=False
+        )
+        logger.info(" PINN Engine initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize PINN engine: {e}")
+        return df
+    
+    # ========================================================================
+    # Extract Real Price Data (Primary Asset)
+    # ========================================================================
+    primary_prefix = "stock_0_"
+    
+    if f'{primary_prefix}close' not in df.columns:
+        logger.warning(f"Primary asset columns not found. Available: {df.columns.tolist()}")
+        return df
+    
+    logger.info("\n[1/3] Preparing real market data...")
+    
+    # Extract real OHLCV data from primary asset
+    price_data = pd.DataFrame({
+        'date': df['date'],
+        'open': df.get(f'{primary_prefix}open', df[f'{primary_prefix}close']),
+        'high': df.get(f'{primary_prefix}high', df[f'{primary_prefix}close'] * 1.01),
+        'low': df.get(f'{primary_prefix}low', df[f'{primary_prefix}close'] * 0.99),
+        'close': df[f'{primary_prefix}close'],
+        'volume': df.get(f'{primary_prefix}volume', 1.0),
+    })
+    
+    logger.info(f"    Extracted {len(price_data)} days of real market data")
+    logger.info(f"     Date range: {price_data['date'].min().date()} to {price_data['date'].max().date()}")
+    logger.info(f"     Price range: ${price_data['close'].min():.2f} - ${price_data['close'].max():.2f}")
+    
+    # ========================================================================
+    # Create Sliding Windows (30-day observations for PINN)
+    # ========================================================================
+    logger.info("\n[2/3] Creating 30-day sliding windows for PINN...")
+    
+    WINDOW_SIZE = 30  # Standard window for LSTM in PINN
+    
+    try:
+        # Adapt price_data for PINN preprocessor expectations
+        # The preprocessor expects: spot_price, strike, days_to_maturity, r_rate
+        price_data_adapted = price_data.copy()
+        price_data_adapted['spot_price'] = price_data_adapted['close']
+        
+        # For PINN regime sensing on pure price data:
+        # - Strike = ATM (current price)
+        # - Days to maturity = 30 days (standard window)
+        # - Risk-free rate = current Brazil SELIC rate (~10.5%)
+        price_data_adapted['strike'] = price_data_adapted['close']
+        price_data_adapted['days_to_maturity'] = WINDOW_SIZE
+        price_data_adapted['r_rate'] = 0.105  # Brazil SELIC rate
+        price_data_adapted['Dividend_Yield'] = 0.0
+        price_data_adapted['symbol'] = assets[0] if assets else 'ASSET_0'
+        
+        # Use preprocessor to create LSTM features from real data
+        x_seq, x_phy, metadata = preprocessor.calculate_lstm_features(
+            price_data_adapted,
+            window_size=WINDOW_SIZE
+        )
+        
+        if len(x_seq) == 0:
+            logger.warning(f"⚠️  No sequences generated. Dataset might be too short (<{WINDOW_SIZE} days).")
+            return df
+        
+        logger.info(f"    Generated {len(x_seq)} sliding windows")
+        logger.info(f"     Effective coverage: Days {WINDOW_SIZE} to {len(price_data)}")
+        
+    except Exception as e:
+        logger.error(f"Error preparing sliding windows: {e}")
+        logger.error("   Ensure price_data has required columns for PINN preprocessing")
+        return df
+    
+    # ========================================================================
+    # Run PINN Batch Inference (Extract Heston Parameters)
+    # ========================================================================
+    logger.info("\n[3/3] Running PINN batch inference...")
+    logger.info(f"   Inferring: κ (kappa), θ (theta), ξ (xi), ρ (rho)")
+    
+    try:
+        results = engine.infer_heston_params(
+            x_seq,
+            x_phy,
+            return_price=False
+        )
+        
+        logger.info(f"    Inference complete. Extracted parameters from {len(results['kappa'])} windows")
+        
+    except Exception as e:
+        logger.error(f"Batch inference failed: {e}")
+        return df
+    
+    # ========================================================================
+    # Create Results DataFrame and Merge
+    # ========================================================================
+    cols = ['pinn_kappa', 'pinn_theta', 'pinn_xi', 'pinn_rho']
+    
+    # Note: remove pinn_nu from list (not all versions may return it)
+    try:
+        res_df = pd.DataFrame({
+            'date': [m[0] for m in metadata],
+            'pinn_kappa': results['kappa'].flatten() if 'kappa' in results else np.zeros(len(metadata)),
+            'pinn_theta': results['theta'].flatten() if 'theta' in results else np.zeros(len(metadata)),
+            'pinn_xi': results['xi'].flatten() if 'xi' in results else np.zeros(len(metadata)),
+            'pinn_rho': results['rho'].flatten() if 'rho' in results else np.zeros(len(metadata)),
+        })
+    except Exception as e:
+        logger.error(f"Error creating results dataframe: {e}")
+        logger.error(f"Results keys available: {list(results.keys())}")
+        return df
+    
+    # Convert date column
+    res_df['date'] = pd.to_datetime(res_df['date'])
+    
+    # Merge into main DataFrame with forward fill for warmup period
+    df = df.drop(columns=[c for c in cols if c in df.columns], errors='ignore')
+    df = pd.merge(df, res_df, on='date', how='left')
+    
+    # Fill NaNs: forward fill (warmup) then backward fill (end), finally zeros
+    for col in cols:
+        if col in df.columns:
+            df[col] = df[col].ffill().bfill().fillna(0.0)
+    
+    # ========================================================================
+    # Summary & Validation
+    # ========================================================================
+    logger.info("\n" + "="*70)
+    logger.info("PINN Feature Enrichment Complete")
+    logger.info("="*70)
+    
+    logger.info("\nHeston Market Regime Parameters:")
+    for col in cols:
+        if col in df.columns:
+            valid_vals = df[col][df[col] != 0.0]
+            if len(valid_vals) > 0:
+                logger.info(f"   {col:12s}: {valid_vals.mean():8.4f} ± {valid_vals.std():8.4f} "
+                           f"(n={len(valid_vals):5d})")
+    
+    logger.info(f"\n DataFrame enriched with {len(cols)} physics-informed features")
+    logger.info(f"Final shape: {df.shape}")
+    logger.info("\n These features enable DRL agent to recognize market regimes:")
+    logger.info("   • κ (kappa): Volatility Mean-Reversion Speed")
+    logger.info("   • θ (theta): Long-term Volatility Level") 
+    logger.info("   • ξ (xi):    Volatility of Volatility (Tail Risk)")
+    logger.info("   • ρ (rho):   Price-Vol Correlation (Leverage Effects)")
+    logger.info("="*70 + "\n")
+    
+    return df
 
 
 def main():
@@ -758,7 +1306,7 @@ def main():
     
     args = parser.parse_args()
     
-    # ⭐ REPRODUCIBILITY: Set random seeds FIRST (before any random operations)
+    #  REPRODUCIBILITY: Set random seeds FIRST (before any random operations)
     set_all_seeds(seed=42, verbose=True)
     assert_reproducible()
     
@@ -789,51 +1337,113 @@ def main():
         # Setup
         setup_directories()
         
-        # Load and preprocess data
-        df = load_and_preprocess_data(args.assets)
+        # =====================================================================
+        # NEW PIPELINE: Separate PINN and DRL datasets
+        # =====================================================================
+        
+        # 1. Load raw options data (multiple rows per asset per day)
+        options_data = load_raw_options_data(args.assets)
+        
+        if not options_data:
+            raise ValueError("No data loaded. Aborting.")
+        
+        # 2. Prepare DRL dataset (daily OHLCV + indicators)
+        logger.info("\nPreparing DRL observation dataset...")
+        processor = DataProcessor()
+        df_drl, options_data_dict = prepare_drl_dataset(options_data, processor)
+        
+        # 3. Prepare PINN dataset (multi-index by date & asset)
+        logger.info("\nPreparing PINN inference dataset...")
+        df_pinn = prepare_pinn_dataset(options_data_dict)
+        
+        # 4. Run PINN inference if enabled
+        pinn_features = None
+        if pinn_features_enabled:
+            logger.info("\nRunning PINN batch inference...")
+            try:
+                # TODO: Implement batch inference on df_pinn
+                # For now, use legacy function
+                df_drl = enrich_with_pinn_features(df_drl, args.assets)
+            except Exception as e:
+                logger.warning(f"PINN inference failed: {e}. Proceeding without features.")
+                pinn_features_enabled = False
         
         # ✓ Validate input safety before expensive RL training
         logger.info("\nValidating inputs...")
         validate_input_safety(
-            df=df,
+            df=df_drl,
             stock_dim=len(args.assets),
             initial_amount=INITIAL_CAPITAL,
             required_columns=['time']  # Only require 'time' column; price column names vary
         )
         logger.info("✓ Input validation passed!")
         
-        # Initialize PINN if enabled
-        pinn_engine = None
-        if pinn_features_enabled:
-            logger.info("\nInitializing PINN inference engine...")
-            try:
-                pinn_engine = PINNInferenceEngine(
-                    checkpoint_path=str(PINN_CHECKPOINT_PATH),
-                    data_stats_path=str(PINN_DATA_STATS_PATH)
-                )
-                logger.info("✓ PINN engine initialized")
-            except Exception as e:
-                logger.warning(f"Could not initialize PINN: {e}")
-                pinn_engine = None
-                pinn_features_enabled = False
+        # Note: PINN features already merged into df_drl above
         
         # Execute pipeline
         if args.mode == 'simple-pipeline':
-            results = simple_pipeline(df, assets=args.assets)
+            results = simple_pipeline(df_drl, assets=args.assets)
         elif args.mode == 'optuna-optimize':
             results = optuna_pipeline(
-                df,
+                df_drl,
                 assets=args.assets,
                 agent_type=args.agent_type,
                 n_trials=args.n_trials,
             )
         else:  # rolling-ensemble
-            results = rolling_window_ensemble(
-                df,
-                pinn_engine=pinn_engine,
-                pinn_features_enabled=pinn_features_enabled,
-                ab_testing_enabled=ab_testing_enabled
-            )
+            if ab_testing_enabled:
+                logger.info("\n" + "="*50)
+                logger.info("🔰 EXECUTING A/B TEST: Baseline vs PINN-Enhanced")
+                logger.info("="*50)
+                
+                # --- Group B: Baseline (Control) ---
+                logger.info("\n>>>Running Group B: Baseline (No PINN)...")
+                results_b = rolling_window_ensemble(
+                    df_drl,
+                    pinn_engine=None,
+                    pinn_features_enabled=False,
+                    ab_testing_enabled=True,
+                    results_prefix="group_B_baseline_"
+                )
+                
+                # --- Group A: Experiment (Treatment) ---
+                logger.info("\n>>> Running Group A: Experiment (With PINN)...")
+                
+                results_a = rolling_window_ensemble(
+                    df_drl,
+                    pinn_engine=None,
+                    pinn_features_enabled=True,
+                    ab_testing_enabled=True,
+                    results_prefix="group_A_pinn_"
+                )
+                
+                # Retrieve aggregated summary for logging
+                summary_b = results_b.get('aggregated', {})
+                summary_a = results_a.get('aggregated', {})
+                
+                logger.info("\n" + "="*50)
+                logger.info("A/B TEST QUICK SUMMARY")
+                logger.info("="*50)
+                logger.info(f"{'Metric':<20} | {'Baseline (B)':<15} | {'PINN (A)':<15} | {'Diff':<10}")
+                logger.info("-" * 65)
+                for metric in ['avg_ensemble_reward', 'avg_ensemble_annual_return']:
+                    val_b = summary_b.get(metric, 0.0)
+                    val_a = summary_a.get(metric, 0.0)
+                    diff = val_a - val_b
+                    logger.info(f"{metric:<20} | {val_b:>15.4f} | {val_a:>15.4f} | {diff:>+10.4f}")
+                logger.info("="*50)
+                
+                results = {'group_a': results_a, 'group_b': results_b}
+                
+            else:
+                # Standard single run
+                logger.info("\nExecuting Rolling Window Ensemble...")
+                results = rolling_window_ensemble(
+                    df_drl,
+                    pinn_engine=None,
+                    pinn_features_enabled=pinn_features_enabled,
+                    ab_testing_enabled=False
+                )
         
         logger.info("\n" + "="*70)
         logger.info("Pipeline Complete!")

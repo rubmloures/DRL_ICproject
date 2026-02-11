@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from config.hyperparameters import FEATURE_EXTRACTOR_PARAMS, PPO_PARAMS
-from src.pinn.heston_pinn import HestonPINN
+from src.pinn.model import DeepHestonHybrid
 
 
 class PINNFeatureExtractor(BaseFeaturesExtractor):
@@ -33,7 +33,7 @@ class PINNFeatureExtractor(BaseFeaturesExtractor):
     def __init__(
         self,
         observation_space,
-        pinn_model: Optional[HestonPINN] = None,
+        pinn_model: Optional[DeepHestonHybrid] = None,
         net_arch: List[int] = None,
         dropout: float = 0.1,
     ):
@@ -93,7 +93,7 @@ class PPOPINNPolicy(ActorCriticPolicy):
         observation_space,
         action_space,
         lr_schedule,
-        pinn_model: Optional[HestonPINN] = None,
+        pinn_model: Optional[DeepHestonHybrid] = None,
         net_arch: Optional[Dict[str, List[int]]] = None,
         **kwargs,
     ):
@@ -146,7 +146,7 @@ class PPOPINNAgent:
     def __init__(
         self,
         env,
-        pinn_model: Optional[HestonPINN] = None,
+        pinn_model: Optional[DeepHestonHybrid] = None,
         ppo_params: Optional[Dict[str, Any]] = None,
         device: str = "cpu",
         verbose: int = 1,
