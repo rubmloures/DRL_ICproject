@@ -17,7 +17,7 @@ PPO_PARAMS: Dict[str, Any] = {
     "gamma": 0.99,
     "gae_lambda": 0.95,
     "clip_range": 0.2,
-    "ent_coef": 0.01,
+    "ent_coef": 0.05,
     "vf_coef": 0.5,
     "max_grad_norm": 0.5,
     "verbose": 1,
@@ -33,7 +33,7 @@ DDPG_PARAMS: Dict[str, Any] = {
     "batch_size": 64,
     "gamma": 0.99,
     "tau": 0.001,
-    "action_noise": None,
+    "action_noise": 0.2,
     "verbose": 1,
 }
 
@@ -45,7 +45,7 @@ A2C_PARAMS: Dict[str, Any] = {
     "n_steps": 5,
     "gamma": 0.99,
     "gae_lambda": 0.98,
-    "ent_coef": 0.01,
+    "ent_coef": 0.05,
     "vf_coef": 0.5,
     "max_grad_norm": 0.5,
     "verbose": 1,

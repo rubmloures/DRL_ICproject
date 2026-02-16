@@ -56,6 +56,7 @@ from src.agents import PPOAgent, DDPGAgent, A2CAgent, EnsembleAgent
 from src.optimization.hyperparameter_optimizer import HyperparameterOptimizer
 from src.evaluation.results_manager import ResultsManager
 from src.evaluation.visualization import TradingVisualizer
+from stable_baselines3.common.monitor import Monitor
 
 # Setup logging - MUST BE BEFORE PINN IMPORT
 logging.basicConfig(
@@ -78,6 +79,9 @@ except ImportError as e:
         logger.error("PINN_ENABLED=True mas módulo indisponível. Abortando!")
         sys.exit(1)
 
+# Diretório para logs do TensorBoard
+TENSORBOARD_LOG_DIR = RESULTS / "tensorboard_logs"
+TENSORBOARD_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 def setup_directories() -> None:
     """Create necessary output directories."""
@@ -427,7 +431,8 @@ def simple_pipeline(df: pd.DataFrame, assets: Optional[List[str]] = None) -> Dic
         buy_cost_pct=TRANSACTION_COST,
         sell_cost_pct=TRANSACTION_COST,
     )
-    
+    train_env = Monitor(train_env, filename=str(log_dir / "train_monitor"))
+
     test_env = StockTradingEnv(
         df=test_df,
         stock_dim=stock_dim,
@@ -435,6 +440,7 @@ def simple_pipeline(df: pd.DataFrame, assets: Optional[List[str]] = None) -> Dic
         buy_cost_pct=TRANSACTION_COST,
         sell_cost_pct=TRANSACTION_COST,
     )
+    test_env = Monitor(test_env, filename=str(log_dir / "test_monitor"))
     
     logger.info(" Environments created")
     
@@ -667,6 +673,10 @@ def rolling_window_ensemble(
                    f"→ {date_range['test_end'].date()}")
         logger.info(f"{'='*70}")
         
+        # Diretório para salvar os logs de cada janela
+        log_dir = RESULTS / "logs" / f"window_{window_idx}"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
         # Create environments
         train_env = StockTradingEnv(
             df=train_df,
@@ -676,6 +686,7 @@ def rolling_window_ensemble(
             sell_cost_pct=TRANSACTION_COST,
             pinn_engine=pinn_engine,
             include_pinn_features=pinn_features_enabled,
+            print_verbosity=1000
         )
         
         test_env = StockTradingEnv(
@@ -690,13 +701,22 @@ def rolling_window_ensemble(
         
         # Train agents
         logger.info("Training agents...")
-        ppo = PPOAgent(env=train_env, **PPO_PARAMS)
-        ddpg = DDPGAgent(env=train_env, **DDPG_PARAMS)
-        a2c = A2CAgent(env=train_env, **A2C_PARAMS)
+        ppo = PPOAgent(env=train_env,
+                       tensorboard_log=str(TENSORBOARD_LOG_DIR), 
+                       **PPO_PARAMS)
+        ddpg = DDPGAgent(env=train_env,
+                         tensorboard_log=str(TENSORBOARD_LOG_DIR), 
+                         **DDPG_PARAMS)
+        a2c = A2CAgent(env=train_env,
+                       tensorboard_log=str(TENSORBOARD_LOG_DIR), 
+                       **A2C_PARAMS)
         
-        ppo.train(total_timesteps=20_000)
-        ddpg.train(total_timesteps=20_000)
-        a2c.train(total_timesteps=20_000)
+        total_steps = TRAINING_CONFIG.get("total_timesteps", 100_000)
+
+        logger.info(f"Training agents for {total_steps} timesteps...")
+        ppo.train(total_timesteps=total_steps)
+        ddpg.train(total_timesteps=total_steps)
+        a2c.train(total_timesteps=total_steps)
         
         # Evaluate
         logger.info("Evaluating...")

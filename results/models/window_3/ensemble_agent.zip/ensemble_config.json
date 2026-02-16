@@ -1,0 +1,14 @@
+{
+  "voting_strategy": "weighted",
+  "agent_weights": {
+    "PPO": 0.27068338516114776,
+    "DDPG": 0.2688126777712868,
+    "A2C": 0.4605039370675654
+  },
+  "n_agents": 3,
+  "agent_names": [
+    "PPO",
+    "DDPG",
+    "A2C"
+  ]
+}

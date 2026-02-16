@@ -60,7 +60,7 @@ VAL_END = "2025-12-31"         # ← Validation in 2025
 ROLLING_WINDOW_CONFIG = {
     'train_weeks': 52,              # ~52 * 5 = 260 trading days (1 year)
     'test_weeks': 4,                # ~4 * 5 = 20 trading days
-    'overlap_weeks': 4,             # Overlap between consecutive windows
+    'overlap_weeks': 48,            # Overlap between consecutive windows (Passo = Tamanho_Treino - Overlap)
     'enabled': True,                # Enable rolling window strategy
     'with_validation_fold': True,   # Enable K-fold validation inside train
     'k_fold': 3,                    # Number of folds for cross-validation

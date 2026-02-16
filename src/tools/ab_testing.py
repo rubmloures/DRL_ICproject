@@ -105,7 +105,7 @@ class ABTestingFramework:
             from src.agents import EnsembleAgent, PPOAgent, DDPGAgent, A2CAgent
             
             if self.verbose:
-                logger.info("🎯 Training Model A (NO PINN)...")
+                logger.info("Training Model A (NO PINN)...")
             
             # Create individual agents
             agents = {
@@ -125,12 +125,12 @@ class ABTestingFramework:
             ensemble.train(total_timesteps=total_timesteps)
             
             if self.verbose:
-                logger.info("✅ Model A training complete")
+                logger.info("Model A training complete")
             
             return ensemble
         
         except Exception as e:
-            logger.error(f"❌ Model A training failed: {e}")
+            logger.error(f"Model A training failed: {e}")
             raise
     
     def train_model_b_with_pinn(
@@ -156,7 +156,7 @@ class ABTestingFramework:
             from src.agents import EnsembleAgent, PPOAgent, DDPGAgent, A2CAgent
             
             if self.verbose:
-                logger.info("🧠 Training Model B (WITH PINN)...")
+                logger.info("Training Model B (WITH PINN)...")
             
             # Create individual agents
             agents = {
@@ -176,12 +176,12 @@ class ABTestingFramework:
             ensemble.train(total_timesteps=total_timesteps)
             
             if self.verbose:
-                logger.info("✅ Model B training complete")
+                logger.info("Model B training complete")
             
             return ensemble
         
         except Exception as e:
-            logger.error(f"❌ Model B training failed: {e}")
+            logger.error(f"Model B training failed: {e}")
             raise
     
     def evaluate_and_compare(
@@ -209,7 +209,7 @@ class ABTestingFramework:
         """
         
         if self.verbose:
-            logger.info(f"📊 Evaluating Window {window_idx}, Fold {fold_idx}...")
+            logger.info(f"Evaluating Window {window_idx}, Fold {fold_idx}...")
         
         # Evaluate Model A
         try:
@@ -222,7 +222,7 @@ class ABTestingFramework:
             returns_a = np.mean(rewards_a)
             dd_a = self._compute_max_drawdown(rewards_a)
         except Exception as e:
-            logger.warning(f"⚠️ Model A evaluation failed: {e}, using zeros")
+            logger.warning(f"Model A evaluation failed: {e}, using zeros")
             rewards_a = np.zeros(n_episodes)
             sharpe_a = 0.0
             returns_a = 0.0
@@ -239,7 +239,7 @@ class ABTestingFramework:
             returns_b = np.mean(rewards_b)
             dd_b = self._compute_max_drawdown(rewards_b)
         except Exception as e:
-            logger.warning(f"⚠️ Model B evaluation failed: {e}, using zeros")
+            logger.warning(f"Model B evaluation failed: {e}, using zeros")
             rewards_b = np.zeros(n_episodes)
             sharpe_b = 0.0
             returns_b = 0.0
@@ -352,7 +352,7 @@ class ABTestingFramework:
     def print_summary_report(self):
         """Print formatted summary report of A/B testing."""
         if not self.results:
-            logger.warning("⚠️ No results to report")
+            logger.warning("No results to report")
             return
         
         df = self.aggregate_results()
@@ -410,4 +410,4 @@ class ABTestingFramework:
         df = self.aggregate_results()
         df.to_csv(filepath, index=False)
         if self.verbose:
-            logger.info(f"✅ A/B test results saved to {filepath}")
+            logger.info(f"A/B test results saved to {filepath}")

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,7 @@ class ResultsManager:
             return obj.tolist()
         elif isinstance(obj, pd.DataFrame):
             return obj.to_dict()
-        elif isinstance(obj, (Path, datetime)):
+        elif isinstance(obj, (Path, datetime, date)): 
             return str(obj)
         else:
             return obj
