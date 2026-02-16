@@ -80,6 +80,9 @@ data/contextos/
 
 data/processed/
 !data/processed/.gitkeep
+
+data/results/
+!data/results/.gitkeep
 # ============================================================================
 # Model Weights & Outputs
 # ============================================================================
