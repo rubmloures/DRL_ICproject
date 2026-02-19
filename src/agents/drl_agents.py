@@ -44,9 +44,10 @@ class PPOAgent(BaseDRLAgent):
         ent_coef: float = 0.01,
         vf_coef: float = 0.5,
         max_grad_norm: float = 0.5,
-        device: str = "cpu",
+        device: str = "auto",
         verbose: int = 1,
         tensorboard_log: Optional[str] = None,
+        policy_kwargs: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize PPO agent.
@@ -67,6 +68,7 @@ class PPOAgent(BaseDRLAgent):
             device: 'cpu' or 'cuda'
             verbose: Verbosity level
             tensorboard_log: TensorBoard log directory
+            policy_kwargs: Custom policy keywords
         """
         super().__init__(env, model_name, device, verbose)
         
@@ -86,6 +88,7 @@ class PPOAgent(BaseDRLAgent):
             device=device,
             verbose=verbose,
             tensorboard_log=tensorboard_log,
+            policy_kwargs=policy_kwargs,
         )
         
         logger.info(f"Created PPO agent with learning_rate={learning_rate}")
@@ -176,9 +179,10 @@ class DDPGAgent(BaseDRLAgent):
         tau: float = 0.005,
         gamma: float = 0.99,
         action_noise: Optional[float] = 0.1,
-        device: str = "cpu",
+        device: str = "auto",
         verbose: int = 1,
         tensorboard_log: Optional[str] = None,
+        policy_kwargs: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize DDPG agent.
@@ -196,6 +200,7 @@ class DDPGAgent(BaseDRLAgent):
             device: 'cpu' or 'cuda'
             verbose: Verbosity level
             tensorboard_log: TensorBoard log directory
+            policy_kwargs: Custom policy keywords
         """
         super().__init__(env, model_name, device, verbose)
         
@@ -219,6 +224,7 @@ class DDPGAgent(BaseDRLAgent):
             device=device,
             verbose=verbose,
             tensorboard_log=tensorboard_log,
+            policy_kwargs=policy_kwargs,
         )
         
         logger.info(f"Created DDPG agent with learning_rate={learning_rate}")
@@ -310,9 +316,10 @@ class A2CAgent(BaseDRLAgent):
         vf_coef: float = 0.5,
         max_grad_norm: float = 0.5,
         use_rms_prop: bool = True,
-        device: str = "cpu",
+        device: str = "auto",
         verbose: int = 1,
         tensorboard_log: Optional[str] = None,
+        policy_kwargs: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize A2C agent.
@@ -331,6 +338,7 @@ class A2CAgent(BaseDRLAgent):
             device: 'cpu' or 'cuda'
             verbose: Verbosity level
             tensorboard_log: TensorBoard log directory
+            policy_kwargs: Custom policy keywords
         """
         super().__init__(env, model_name, device, verbose)
         
@@ -348,6 +356,7 @@ class A2CAgent(BaseDRLAgent):
             device=device,
             verbose=verbose,
             tensorboard_log=tensorboard_log,
+            policy_kwargs=policy_kwargs,
         )
         
         logger.info(f"Created A2C agent with learning_rate={learning_rate}")

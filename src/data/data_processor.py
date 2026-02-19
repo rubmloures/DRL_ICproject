@@ -127,15 +127,17 @@ class DataProcessor:
         
         # Scheme 3: Already standardized (open, high, low, close, volume)
         if 'open' in df.columns and 'close' in df.columns:
+            # Columns are already standardized - no renaming needed
             available_renames = {}
-            if 'open' not in df.columns:
-                df['open'] = df.get('close', df.iloc[:, 0])
+            # Ensure all required columns exist with sensible defaults
             if 'high' not in df.columns:
                 df['high'] = df.get('spot_price_max', df.get('close', df.iloc[:, 0]))
             if 'low' not in df.columns:
                 df['low'] = df.get('spot_price_min', df.get('close', df.iloc[:, 0]))
             if 'volume' not in df.columns:
                 df['volume'] = df.get('acao_vol_fin_mean', 1.0)
+            # Mark as valid - columns are already standard
+            available_renames = {'open': 'open', 'close': 'close'}  # Sentinel: indicates columns are ready
         else:
             # Try scheme 1 (original B3 naming)
             available_renames = {k: v for k, v in ohlcv_map_original.items() if k in df.columns}
@@ -167,9 +169,15 @@ class DataProcessor:
             )
             return df
         
-        logger.info(f"Detected OHLCV columns: {list(available_renames.keys())}")
-        
-        df_ta = df.rename(columns=available_renames)
+        # Handle already-standardized columns (Scheme 3)
+        if available_renames.get('open') == 'open' and available_renames.get('close') == 'close':
+            # Columns are already standard - use df directly
+            logger.info(f"✓ OHLCV columns already standardized: open, high, low, close, volume")
+            df_ta = df
+        else:
+            # Need to rename
+            logger.info(f"Detected OHLCV columns: {list(available_renames.keys())}")
+            df_ta = df.rename(columns=available_renames)
         
         if not HAS_PANDAS_TA:
             logger.warning("pandas_ta not available. Computing basic indicators only.")

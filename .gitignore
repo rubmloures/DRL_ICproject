@@ -83,6 +83,15 @@ data/processed/
 
 data/results/
 !data/results/.gitkeep
+
+results/models
+!results/models/.gitkeep
+
+results/metrics
+!results/metrics/.gitkeep
+
+results/tensorboard_logs
+!results/tensorboard_logs/.gitkeep
 # ============================================================================
 # Model Weights & Outputs
 # ============================================================================

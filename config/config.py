@@ -53,14 +53,17 @@ VAL_END = "2025-12-31"         # ← Validation in 2025
 # For fixed splits, use TRAIN_START/END and TEST_START/END above
 
 # =============================================================================
-# Rolling Window Configuration (Janela Deslizante)
+# Rolling Window Configuration (Janela Deslizante) — Purged Cross-Validation
 # =============================================================================
-# Strategy: 14 weeks training, 4 weeks testing, 2 weeks overlap
-# With K-fold validation inside each train window
+# Strategy: 52 weeks training, 4 weeks testing, 48 weeks overlap
+# With PURGE EMBARGO to prevent data leakage (De Prado, 2018)
+# With K-fold validation inside each train window (also purged)
 ROLLING_WINDOW_CONFIG = {
     'train_weeks': 52,              # ~52 * 5 = 260 trading days (1 year)
     'test_weeks': 4,                # ~4 * 5 = 20 trading days
     'overlap_weeks': 48,            # Overlap between consecutive windows (Passo = Tamanho_Treino - Overlap)
+    'purge_days': 5,                # ← EMBARGO: 5 trading days gap (1 week) between train/test
+    'purge_kfold_days': 3,          # ← K-Fold purge: 3 days around fold boundaries
     'enabled': True,                # Enable rolling window strategy
     'with_validation_fold': True,   # Enable K-fold validation inside train
     'k_fold': 3,                    # Number of folds for cross-validation

@@ -11,6 +11,7 @@ import torch.nn as nn
 import json
 import numpy as np
 import time
+import os
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List, Any
 from collections import OrderedDict
@@ -71,9 +72,12 @@ class PINNInferenceEngine:
         # Load model architecture and weights (optional - checkpoint may not exist yet)
         try:
             self.model = self._load_checkpoint()
-            self.model.to(device)
-            self.model.eval()
-            self.model_loaded = True
+            if self.model is not None:
+                self.model.to(device)
+                self.model.eval()
+                self.model_loaded = True
+            else:
+                self.model_loaded = False
         except FileNotFoundError:
             logger.warning(f"⚠️  Checkpoint not found at {checkpoint_path}")
             logger.warning("   PINN model will be initialized with random weights on first training")
@@ -150,8 +154,14 @@ class PINNInferenceEngine:
             # Load checkpoint state dict
             state_dict = torch.load(self.checkpoint_path, map_location=self.device)
             
-            # Get model config from data_stats (should now match checkpoint architecture)
-            model_config = self.data_stats.get('config', {})
+            # Use explicit configuration from src/pinn/config.py
+            try:
+                from .config import MODEL_CONFIG
+                model_config = MODEL_CONFIG
+                logger.info(f"ℹ️  Using explicit configuration from src/pinn/config.py for model initialization")
+            except ImportError:
+                logger.warning("⚠️ Could not import MODEL_CONFIG from .config, falling back to data_stats")
+                model_config = self.data_stats.get('config', {})
             
             if not model_config:
                 # Infer config from data_stats if not available
@@ -191,7 +201,7 @@ class PINNInferenceEngine:
                 return None
         
         except Exception as e:
-            logger.debug(f"Could not load checkpoint: {type(e).__name__}: {str(e)[:100]}")
+            logger.error(f"Could not load checkpoint: {type(e).__name__}: {str(e)}")
             return None
     
     def validate_inputs(

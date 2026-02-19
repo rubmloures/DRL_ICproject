@@ -25,7 +25,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import logging
 
 from src.agents.drl_agents import PPOAgent, DDPGAgent, A2CAgent
-
+from src.agents.transformer_extractor import TransformerFeatureExtractor
 logger = logging.getLogger(__name__)
 
 
@@ -108,7 +108,16 @@ class HyperparameterOptimizer:
                 "ent_coef": trial.suggest_float("ent_coef", 0.0, 0.1),
                 "vf_coef": trial.suggest_float("vf_coef", 0.4, 0.9),
             }
-        
+            policy_kwargs = {
+                "features_extractor_class": TransformerFeatureExtractor,
+                "features_extractor_kwargs": {
+                    "features_dim": trial.suggest_categorical("features_dim", [128, 256]),
+                    "n_heads": trial.suggest_categorical("n_heads", [2, 4]),
+                    "n_layers": trial.suggest_int("n_layers", 1, 3)
+                }
+            }
+            # Adicionar ao dicionário de params
+            params["policy_kwargs"] = policy_kwargs
         elif self.agent_type == "DDPG":
             params = {
                 "learning_rate": trial.suggest_float("lr", 1e-5, 1e-3, log=True),
@@ -117,6 +126,16 @@ class HyperparameterOptimizer:
                 "gamma": trial.suggest_float("gamma", 0.95, 0.9999),
                 "action_noise": trial.suggest_float("action_noise", 0.05, 0.5),
             }
+            policy_kwargs = {
+                "features_extractor_class": TransformerFeatureExtractor,
+                "features_extractor_kwargs": {
+                    "features_dim": trial.suggest_categorical("features_dim", [128, 256]),
+                    "n_heads": trial.suggest_categorical("n_heads", [2, 4]),
+                    "n_layers": trial.suggest_int("n_layers", 1, 3)
+                },
+                "net_arch": dict(pi=[128, 64], qf=[128, 64])
+            }
+            params["policy_kwargs"] = policy_kwargs
         
         elif self.agent_type == "A2C":
             params = {
@@ -127,6 +146,16 @@ class HyperparameterOptimizer:
                 "ent_coef": trial.suggest_float("ent_coef", 0.0, 0.1),
                 "vf_coef": trial.suggest_float("vf_coef", 0.4, 0.9),
             }
+            policy_kwargs = {
+                "features_extractor_class": TransformerFeatureExtractor,
+                "features_extractor_kwargs": {
+                    "features_dim": trial.suggest_categorical("features_dim", [128, 256]),
+                    "n_heads": trial.suggest_categorical("n_heads", [2, 4]),
+                    "n_layers": trial.suggest_int("n_layers", 1, 3)
+                },
+                "net_arch": dict(pi=[128, 64], vf=[128, 64])
+            }
+            params["policy_kwargs"] = policy_kwargs
         
         else:
             raise ValueError(f"Unknown agent_type: {self.agent_type}")

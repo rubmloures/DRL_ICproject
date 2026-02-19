@@ -15,7 +15,6 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from config.hyperparameters import FEATURE_EXTRACTOR_PARAMS, PPO_PARAMS
 from src.pinn.model import DeepHestonHybrid
 
 
@@ -49,7 +48,10 @@ class PINNFeatureExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, features_dim=1)
         
         self.pinn_model = pinn_model
-        net_arch = net_arch or FEATURE_EXTRACTOR_PARAMS.get("net_arch", [256, 256])
+        
+        if net_arch is None:
+            from config.hyperparameters import FEATURE_EXTRACTOR_PARAMS
+            net_arch = FEATURE_EXTRACTOR_PARAMS.get("net_arch", [256, 256])
         
         # Get input dimension
         input_dim = observation_space.shape[0]
@@ -110,6 +112,7 @@ class PPOPINNPolicy(ActorCriticPolicy):
         """
         # Use PINNFeatureExtractor
         if net_arch is None:
+            from config.hyperparameters import FEATURE_EXTRACTOR_PARAMS
             net_arch = {
                 "pi": FEATURE_EXTRACTOR_PARAMS.get("net_arch", [256, 256]),
                 "vf": FEATURE_EXTRACTOR_PARAMS.get("net_arch", [256, 256]),
@@ -163,7 +166,13 @@ class PPOPINNAgent:
         """
         self.env = env
         self.pinn_model = pinn_model
-        self.ppo_params = ppo_params or PPO_PARAMS.copy()
+        
+        if ppo_params is None:
+            from config.hyperparameters import PPO_PARAMS
+            self.ppo_params = PPO_PARAMS.copy()
+        else:
+            self.ppo_params = ppo_params
+            
         self.device = device
         self.verbose = verbose
         

@@ -61,7 +61,11 @@ from stable_baselines3.common.monitor import Monitor
 # Setup logging - MUST BE BEFORE PINN IMPORT
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("training_output.txt", mode='w', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -663,6 +667,8 @@ def rolling_window_ensemble(
         train_weeks=ROLLING_WINDOW_CONFIG['train_weeks'],
         test_weeks=ROLLING_WINDOW_CONFIG['test_weeks'],
         overlap_weeks=ROLLING_WINDOW_CONFIG['overlap_weeks'],
+        purge_days=ROLLING_WINDOW_CONFIG.get('purge_days', 0),
+        purge_kfold_days=ROLLING_WINDOW_CONFIG.get('purge_kfold_days', None),
     )
     
     window_results = []

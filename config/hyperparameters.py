@@ -5,6 +5,7 @@ Neural network and training hyperparameters.
 """
 
 from typing import Dict, Any
+from src.agents.transformer_extractor import TransformerFeatureExtractor
 
 # =============================================================================
 # PPO Agent Hyperparameters
@@ -21,6 +22,16 @@ PPO_PARAMS: Dict[str, Any] = {
     "vf_coef": 0.5,
     "max_grad_norm": 0.5,
     "verbose": 1,
+    "policy_kwargs": {
+        "features_extractor_class": TransformerFeatureExtractor,
+        "features_extractor_kwargs": {
+            "features_dim": 256, 
+            "n_heads": 4, 
+            "n_layers": 2
+        },
+        # net_arch define as camadas DEPOIS do transformer (Actor/Critic)
+        "net_arch": dict(pi=[128, 64], vf=[128, 64]) 
+    }
 }
 
 # =============================================================================
@@ -35,6 +46,15 @@ DDPG_PARAMS: Dict[str, Any] = {
     "tau": 0.001,
     "action_noise": 0.2,
     "verbose": 1,
+    "policy_kwargs": {
+        "features_extractor_class": TransformerFeatureExtractor,
+        "features_extractor_kwargs": {
+            "features_dim": 256, 
+            "n_heads": 4, 
+            "n_layers": 2
+        },
+        "net_arch": dict(pi=[128, 64], qf=[128, 64]) 
+    }
 }
 
 # =============================================================================
@@ -49,6 +69,15 @@ A2C_PARAMS: Dict[str, Any] = {
     "vf_coef": 0.5,
     "max_grad_norm": 0.5,
     "verbose": 1,
+    "policy_kwargs": {
+        "features_extractor_class": TransformerFeatureExtractor,
+        "features_extractor_kwargs": {
+            "features_dim": 256, 
+            "n_heads": 4, 
+            "n_layers": 2
+        },
+        "net_arch": dict(pi=[128, 64], vf=[128, 64]) 
+    }
 }
 
 # =============================================================================

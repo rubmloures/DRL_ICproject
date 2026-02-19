@@ -107,7 +107,12 @@ class DeepHestonHybrid(nn.Module):
         lstm_hidden_size = config['lstm_hidden_size']
         
         if self.use_embedding:
-            num_assets = config.get('num_assets', 10)
+            # Prioritize asset_map from data_stats to match trained model
+            if 'asset_map' in data_stats and data_stats['asset_map']:
+                num_assets = len(data_stats['asset_map'])
+            else:
+                num_assets = config.get('num_assets', 10)
+            
             embedding_dim = config.get('asset_embedding_dim', 8)
             self.asset_embedding = nn.Embedding(num_assets, embedding_dim)
             

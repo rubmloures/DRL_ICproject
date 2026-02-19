@@ -64,20 +64,22 @@ def load_and_process_data(data_dir: Path, assets: list, date_col: str = 'data'):
 
 
 def create_rolling_windows(df: pd.DataFrame, train_weeks: int = 14, 
-                          test_weeks: int = 4, overlap_weeks: int = 2):
-    """Create rolling window strategy."""
+                          test_weeks: int = 4, overlap_weeks: int = 2,
+                          purge_days: int = 5):
+    """Create purged rolling window strategy with embargo gap."""
     logger.info("="*70)
-    logger.info("STEP 2: Rolling Window Configuration")
+    logger.info("STEP 2: Purged Rolling Window Configuration")
     logger.info("="*70)
     
     strategy = RollingWindowStrategy(
         df=df,
         train_weeks=train_weeks,
         test_weeks=test_weeks,
-        overlap_weeks=overlap_weeks
+        overlap_weeks=overlap_weeks,
+        purge_days=purge_days,
     )
     
-    logger.info(f"Rolling windows created successfully")
+    logger.info(f"Purged rolling windows created successfully (embargo={purge_days}d)")
     return strategy
 
 
