@@ -12,6 +12,7 @@ import logging
 from stable_baselines3 import PPO, DDPG, A2C
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.noise import NormalActionNoise
+from stable_baselines3.common.logger import configure
 
 from .base_agent import BaseDRLAgent
 
@@ -90,6 +91,12 @@ class PPOAgent(BaseDRLAgent):
             tensorboard_log=tensorboard_log,
             policy_kwargs=policy_kwargs,
         )
+        
+        # Configure logger to save progress.csv
+        if tensorboard_log:
+            logger_format = ["stdout", "csv", "tensorboard"]
+            custom_logger = configure(tensorboard_log, logger_format)
+            self.model.set_logger(custom_logger)
         
         logger.info(f"Created PPO agent with learning_rate={learning_rate}")
     
@@ -227,6 +234,12 @@ class DDPGAgent(BaseDRLAgent):
             policy_kwargs=policy_kwargs,
         )
         
+        # Configure logger to save progress.csv
+        if tensorboard_log:
+            logger_format = ["stdout", "csv", "tensorboard"]
+            custom_logger = configure(tensorboard_log, logger_format)
+            self.model.set_logger(custom_logger)
+        
         logger.info(f"Created DDPG agent with learning_rate={learning_rate}")
     
     def train(
@@ -358,6 +371,12 @@ class A2CAgent(BaseDRLAgent):
             tensorboard_log=tensorboard_log,
             policy_kwargs=policy_kwargs,
         )
+        
+        # Configure logger to save progress.csv
+        if tensorboard_log:
+            logger_format = ["stdout", "csv", "tensorboard"]
+            custom_logger = configure(tensorboard_log, logger_format)
+            self.model.set_logger(custom_logger)
         
         logger.info(f"Created A2C agent with learning_rate={learning_rate}")
     

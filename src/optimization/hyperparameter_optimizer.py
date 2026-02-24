@@ -314,3 +314,92 @@ class HyperparameterOptimizer:
             raise ValueError(f"Unknown agent_type: {agent_type}")
         
         return defaults[agent_type]
+
+def run_all_optimizers(env_fn: Callable[[], Any], n_trials: int = 50, results_dir: str = "results") -> None:
+    """
+    Run hyperparameter optimization for all supported agents and save results.
+    
+    Args:
+        env_fn: A callable returning the Gymnasium environment.
+        n_trials: Number of trials per agent.
+        results_dir: Directory to save the resulting txt file.
+    """
+    import os
+    from datetime import datetime
+    
+    agents = ["PPO", "A2C", "DDPG"]
+    all_best_params = {}
+    
+    # Create results dir if needed
+    os.makedirs(results_dir, exist_ok=True)
+    out_file = Path(results_dir) / "best_hyperparameter.txt"
+    
+    logger.info(f"Starting Hyperparameter Optimization for agents: {agents}")
+    
+    for agent_str in agents:
+        logger.info(f"\n{'='*40}\nOptimizing {agent_str}\n{'='*40}")
+        try:
+            optimizer = HyperparameterOptimizer(
+                agent_type=agent_str,
+                env_fn=env_fn
+            )
+            
+            result = optimizer.optimize(n_trials=n_trials, show_progress_bar=True)
+            all_best_params[agent_str] = {
+                "sharpe": result["best_value"],
+                "params": result["best_params"]
+            }
+        except Exception as e:
+            logger.error(f"Optimization for {agent_str} failed: {e}")
+            all_best_params[agent_str] = {"error": str(e)}
+            
+    # Write to text file
+    with open(out_file, "w") as f:
+        f.write(f"Hyperparameter Optimization Results\n")
+        f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Trials per agent: {n_trials}\n")
+        f.write("="*50 + "\n\n")
+        
+        for agent_str, data in all_best_params.items():
+            f.write(f"[{agent_str}]\n")
+            if "error" in data:
+                f.write(f"Failed: {data['error']}\n\n")
+                continue
+                
+            f.write(f"Best Sharpe Ratio: {data['sharpe']:.4f}\n")
+            f.write("Best Parameters:\n")
+            for param, value in data['params'].items():
+                f.write(f"  {param}: {value}\n")
+            f.write("\n")
+            
+    logger.info(f"Saved best hyperparameters to {out_file}")
+
+if __name__ == "__main__":
+    # Example execution block when running `python src/optimization/hyperparameter_optimizer.py`
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    
+    # We need a dummy or actual env mapping for standalone testing
+    # Importing dynamically to avoid circular imports if run directly
+    import sys
+    sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+    
+    try:
+        from src.env.stock_env_b3 import StockTradingEnv
+        from src.data.data_processor import DataProcessor
+        # Create a lightweight dummy env function for the optimizer
+        def make_dummy_env():
+            import pandas as pd
+            import numpy as np
+            # Generate minimal dummy data
+            dates = pd.date_range(start="2024-01-01", periods=100, freq="B")
+            df = pd.DataFrame({
+                "date": dates,
+                "0_close": np.random.normal(20, 1, 100),
+                "1_close": np.random.normal(30, 2, 100),
+            }).set_index("date")
+            return StockTradingEnv(df=df, stock_dim=2, initial_amount=100000)
+            
+        logger.info("Running hyperparameter optimization with 5 trials for demonstration.")
+        run_all_optimizers(env_fn=make_dummy_env, n_trials=5)
+    except Exception as e:
+        logger.error(f"Could not run standalone optimizer: {e}")

@@ -1,0 +1,37 @@
+Hyperparameter Optimization Results
+Date: 2026-02-23 20:39:55
+Trials per agent: 1
+==================================================
+
+[PPO]
+Best Sharpe Ratio: 0.0000
+Best Parameters:
+  lr: 0.0001725356361569843
+  n_steps: 1536
+  batch_size: 64
+  n_epochs: 17
+  gamma: 0.9555191205116365
+  gae_lambda: 0.9781040209698428
+  clip_range: 0.2967136465708328
+  ent_coef: 0.016258932435712904
+  vf_coef: 0.8132684705950992
+  features_dim: 128
+  n_heads: 4
+  n_layers: 1
+
+[A2C]
+Best Sharpe Ratio: 0.0000
+Best Parameters:
+  lr: 0.000701948851254332
+  n_steps: 20
+  gamma: 0.9969124506236693
+  gae_lambda: 0.9627996346712198
+  ent_coef: 0.04703740826174272
+  vf_coef: 0.45832552866467424
+  features_dim: 256
+  n_heads: 4
+  n_layers: 1
+
+[DDPG]
+Failed: [Errno 22] Invalid argument
+

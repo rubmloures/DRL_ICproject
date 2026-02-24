@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
+import glob
+import seaborn as sns
 
 logger = logging.getLogger(__name__)
 
@@ -305,7 +307,85 @@ class TradingVisualizer:
                     logger.warning(f"Could not generate tear sheet: {e}")
             
             return metrics
-        
         except Exception as e:
             logger.error(f"Error generating pyfolio report: {e}")
             return {}
+
+
+    @staticmethod
+    def plot_sb3_training_metrics(log_dir: str) -> plt.Figure:
+        """Lê os logs de progresso do SB3 (progress.csv) e plota métricas de saúde."""
+        progress_files = glob.glob(f"{log_dir}/**/progress.csv", recursive=True)
+        if not progress_files:
+            logger.warning("Nenhum arquivo progress.csv encontrado no diretório.")
+            return plt.figure()
+        
+        # Pega o arquivo mais recente
+        latest_file = max(progress_files, key=Path)
+        df = pd.read_csv(latest_file)
+        
+        fig, axs = plt.subplots(1, 3, figsize=(18, 5))
+        
+        if 'rollout/ep_rew_mean' in df.columns:
+            axs[0].plot(df['rollout/ep_rew_mean'], color='green')
+            axs[0].set_title('Recompensa Média por Episódio')
+            
+        if 'train/entropy_loss' in df.columns:
+            axs[1].plot(df['train/entropy_loss'], color='orange')
+            axs[1].set_title('Decaimento da Entropia (Exploração)')
+            
+        if 'train/value_loss' in df.columns:
+            axs[2].plot(df['train/value_loss'], color='red')
+            axs[2].set_title('Value Loss (Erro do Crítico)')
+            
+        plt.tight_layout()
+        return fig
+
+    @staticmethod
+    def plot_strategy_vs_benchmark(portfolio_history: list, benchmark_prices: list, dates: list) -> plt.Figure:
+        """Compara a estratégia contra o Buy & Hold rebaseado para 100."""
+        # Garante tamanhos iguais
+        min_len = min(len(portfolio_history), len(benchmark_prices), len(dates))
+        
+        df = pd.DataFrame({
+            'Date': pd.to_datetime(dates[:min_len]),
+            'Estratégia DRL': portfolio_history[:min_len],
+            'Benchmark': benchmark_prices[:min_len]
+        }).set_index('Date')
+        
+        # Rebase para 100
+        df['Estratégia DRL'] = (df['Estratégia DRL'] / df['Estratégia DRL'].iloc[0]) * 100
+        df['Benchmark'] = (df['Benchmark'] / df['Benchmark'].iloc[0]) * 100
+        
+        fig, ax = plt.subplots(figsize=(14, 6))
+        ax.plot(df.index, df['Estratégia DRL'], label='Ensemble DRL + PINN', linewidth=2, color='blue')
+        ax.plot(df.index, df['Benchmark'], label='Buy & Hold (Benchmark)', linewidth=1.5, color='gray', linestyle='--')
+        
+        # Sombreamento onde DRL ganha
+        ax.fill_between(df.index, df['Estratégia DRL'], df['Benchmark'], 
+                         where=(df['Estratégia DRL'] > df['Benchmark']), 
+                         color='green', alpha=0.1, interpolate=True)
+                         
+        ax.set_title("Performance Cumulativa Out-of-Sample: Modelo vs Benchmark")
+        ax.set_ylabel("Retorno Acumulado (Base 100)")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        return fig
+
+    @staticmethod
+    def plot_rolling_volatility(portfolio_history: list) -> plt.Figure:
+        """Mede a volatilidade móvel da estratégia (Risco Dinâmico)."""
+        returns = pd.Series(portfolio_history).pct_change().dropna()
+        
+        rolling_vol_21d = returns.rolling(window=21).std() * np.sqrt(252)
+        rolling_vol_63d = returns.rolling(window=63).std() * np.sqrt(252)
+        
+        fig, ax = plt.subplots(figsize=(14, 4))
+        ax.plot(rolling_vol_21d, label='Volatilidade Móvel (1 Mês)', color='purple', alpha=0.6)
+        ax.plot(rolling_vol_63d, label='Volatilidade Móvel (3 Meses)', color='black', linewidth=2)
+        
+        ax.axhline(0.20, color='red', linestyle='--', label='Limite de Risco (20% a.a.)')
+        ax.set_title("Perfil de Risco Dinâmico da Estratégia DRL")
+        ax.set_ylabel("Volatilidade Anualizada")
+        ax.legend()
+        return fig

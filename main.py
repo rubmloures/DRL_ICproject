@@ -57,6 +57,7 @@ from src.optimization.hyperparameter_optimizer import HyperparameterOptimizer
 from src.evaluation.results_manager import ResultsManager
 from src.evaluation.visualization import TradingVisualizer
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.logger import configure
 
 # Setup logging - MUST BE BEFORE PINN IMPORT
 logging.basicConfig(
@@ -719,6 +720,18 @@ def rolling_window_ensemble(
         
         total_steps = TRAINING_CONFIG.get("total_timesteps", 100_000)
 
+        logger.info("Configurando SB3 Loggers (CSV/Tensorboard)...")
+        sb3_log_dir = log_dir / "sb3_logs"
+        
+        ppo_logger = configure(str(sb3_log_dir / "ppo"), ["stdout", "csv", "tensorboard"])
+        ppo.model.set_logger(ppo_logger)
+        
+        ddpg_logger = configure(str(sb3_log_dir / "ddpg"), ["stdout", "csv", "tensorboard"])
+        ddpg.model.set_logger(ddpg_logger)
+        
+        a2c_logger = configure(str(sb3_log_dir / "a2c"), ["stdout", "csv", "tensorboard"])
+        a2c.model.set_logger(a2c_logger)
+
         logger.info(f"Training agents for {total_steps} timesteps...")
         ppo.train(total_timesteps=total_steps)
         ddpg.train(total_timesteps=total_steps)
@@ -756,9 +769,7 @@ def rolling_window_ensemble(
         # Evaluate ensemble performance (Reward)
         ensemble_metrics = ensemble.evaluate(n_episodes=3, env=test_env)
         
-        # ---------------------------------------------------------------------
         # Detailed Evaluation for Metrics (Sharpe, Return, Drawdown)
-        # ---------------------------------------------------------------------
         # Run one deterministic episode to get daily portfolio values
         obs, _ = test_env.reset()
         done = False
@@ -896,7 +907,9 @@ def rolling_window_ensemble(
     # O asset_memory tem o valor inicial + valor a cada dia. Ajustamos o tamanho.
     account_memory = test_env.asset_memory
     dates = test_env.df['date'].values if 'date' in test_env.df.columns else test_env.df.index
-    
+    benchmark_col = 'stock_0_close' if 'stock_0_close' in test_env.df.columns else test_env.df.columns[0]
+    benchmark_prices = test_env.df[benchmark_col].values[:len(account_memory)]
+
     # Garantir que os tamanhos batem (pode haver deslocamento de 1 dia pelo valor inicial)
     if len(account_memory) > len(dates):
         account_memory = account_memory[:len(dates)]
@@ -916,12 +929,31 @@ def rolling_window_ensemble(
     results_mgr.save_plot(fig_drawdown, 'drawdown_underwater')
     # Comparativo de Métricas (Barras)
     metrics_dict = {
-        'PPO': ppo_metrics, 'DDPG': ddpg_metrics, 
-        'A2C': a2c_metrics, 'Ensemble': ensemble_metrics
+        'PPO': ppo_metrics, 
+        'DDPG': ddpg_metrics, 
+        'A2C': a2c_metrics, 
+        'Ensemble': ensemble_metrics
     }
     fig_metrics = visualizer.plot_metrics_comparison(metrics_dict)
     results_mgr.save_plot(fig_metrics, 'metrics_comparison')
-    
+    # 
+    try:
+        # Gráfico Estratégia vs Benchmark
+        fig_bench = visualizer.plot_strategy_vs_benchmark(account_memory, benchmark_prices, dates)
+        results_mgr.save_plot(fig_bench, f'{results_prefix}strategy_vs_benchmark')
+        
+        # Gráfico de Volatilidade Móvel
+        fig_vol = visualizer.plot_rolling_volatility(account_memory)
+        results_mgr.save_plot(fig_vol, f'{results_prefix}rolling_volatility')
+        
+        # Opcional: Salvar plot de saúde do treino do PPO da última janela
+        last_ppo_log = RESULTS / "logs" / f"window_{window_idx}" / "sb3_logs" / "ppo"
+        if last_ppo_log.exists():
+            fig_health = visualizer.plot_sb3_training_metrics(str(last_ppo_log))
+            results_mgr.save_plot(fig_health, f'{results_prefix}training_health_ppo')
+    except Exception as e:
+        logger.warning(f"Erro ao gerar novos gráficos de validação: {e}")
+        
     logger.info(" Gráficos gerados e salvos em results/plots/")
     
     return complete_results
