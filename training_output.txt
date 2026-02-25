@@ -1,195 +1,564 @@
-2026-02-23 22:54:54,658 - INFO - ✓ Random seeds set to 42
+2026-02-24 22:24:45,592 - INFO - ✓ Random seeds set to 42
   - random.seed(42)
   - np.random.seed(42)
   - torch.manual_seed(42)
   - torch.cuda.manual_seed_all(42)
   - torch.backends.cudnn.deterministic = True
-2026-02-23 22:54:54,659 - INFO - 
+2026-02-24 22:24:45,593 - INFO - 
 ======================================================================
-2026-02-23 22:54:54,659 - INFO - DRL Stock Trading Agent - Main Pipeline
-2026-02-23 22:54:54,659 - INFO - Mode: optuna-optimize
-2026-02-23 22:54:54,659 - INFO - Assets: ['PETR4', 'VALE3']
-2026-02-23 22:54:54,659 - INFO - Start time: 2026-02-23 22:54:54.659587
-2026-02-23 22:54:54,660 - INFO - ======================================================================
-2026-02-23 22:54:54,660 - INFO -  D:\UERJ\Programacao_e_Codigos\DRL_ICproject\data\processed
-2026-02-23 22:54:54,661 - INFO -  D:\UERJ\Programacao_e_Codigos\DRL_ICproject\trained_models
-2026-02-23 22:54:54,661 - INFO -  D:\UERJ\Programacao_e_Codigos\DRL_ICproject\results
-2026-02-23 22:54:54,661 - INFO - 
+2026-02-24 22:24:45,593 - INFO - DRL Stock Trading Agent - Main Pipeline
+2026-02-24 22:24:45,593 - INFO - Mode: rolling-ensemble
+2026-02-24 22:24:45,594 - INFO - Assets: ['PETR4', 'VALE3']
+2026-02-24 22:24:45,594 - INFO - PINN Features: ENABLED
+2026-02-24 22:24:45,594 - INFO - Start time: 2026-02-24 22:24:45.594261
+2026-02-24 22:24:45,594 - INFO - ======================================================================
+2026-02-24 22:24:45,594 - INFO -  D:\UERJ\Programacao_e_Codigos\DRL_ICproject\data\processed
+2026-02-24 22:24:45,594 - INFO -  D:\UERJ\Programacao_e_Codigos\DRL_ICproject\trained_models
+2026-02-24 22:24:45,594 - INFO -  D:\UERJ\Programacao_e_Codigos\DRL_ICproject\results
+2026-02-24 22:24:45,594 - INFO - 
 ======================================================================
-2026-02-23 22:54:54,661 - INFO - STEP 1: Loading Raw Options Data (For PINN Inference)
-2026-02-23 22:54:54,662 - INFO - ======================================================================
-2026-02-23 22:54:54,662 - INFO - Loading PETR4 options chain...
-2026-02-23 22:54:54,662 - INFO - Loading PETR4 from D:\UERJ\Programacao_e_Codigos\DRL_ICproject\data\raw\PETR4.csv
-2026-02-23 22:54:56,590 - INFO - Successfully loaded PETR4: 761162 records
-2026-02-23 22:54:56,923 - INFO -   ✓ Loaded 761162 option rows for PETR4
-2026-02-23 22:54:56,923 - INFO - Loading VALE3 options chain...
-2026-02-23 22:54:56,924 - INFO - Loading VALE3 from D:\UERJ\Programacao_e_Codigos\DRL_ICproject\data\raw\VALE3.csv
-2026-02-23 22:54:58,388 - INFO - Successfully loaded VALE3: 547370 records
-2026-02-23 22:54:58,625 - INFO -   ✓ Loaded 547370 option rows for VALE3
-2026-02-23 22:54:58,656 - INFO - 
+2026-02-24 22:24:45,594 - INFO - STEP 1: Loading Raw Options Data (For PINN Inference)
+2026-02-24 22:24:45,594 - INFO - ======================================================================
+2026-02-24 22:24:45,595 - INFO - Loading PETR4 options chain...
+2026-02-24 22:24:45,595 - INFO - Loading PETR4 from D:\UERJ\Programacao_e_Codigos\DRL_ICproject\data\raw\PETR4.csv
+2026-02-24 22:24:46,998 - INFO - Successfully loaded PETR4: 761162 records
+2026-02-24 22:24:47,218 - INFO -   ✓ Loaded 761162 option rows for PETR4
+2026-02-24 22:24:47,218 - INFO - Loading VALE3 options chain...
+2026-02-24 22:24:47,218 - INFO - Loading VALE3 from D:\UERJ\Programacao_e_Codigos\DRL_ICproject\data\raw\VALE3.csv
+2026-02-24 22:24:48,325 - INFO - Successfully loaded VALE3: 547370 records
+2026-02-24 22:24:48,465 - INFO -   ✓ Loaded 547370 option rows for VALE3
+2026-02-24 22:24:48,492 - INFO - 
 Preparing DRL observation dataset...
-2026-02-23 22:54:58,657 - INFO - 
+2026-02-24 22:24:48,492 - INFO - 
 ======================================================================
-2026-02-23 22:54:58,657 - INFO - STEP 2: Preparing DRL Dataset (Daily OHLCV + Technicals + Greeks)
-2026-02-23 22:54:58,657 - INFO - ======================================================================
-2026-02-23 22:54:58,657 - INFO - 
+2026-02-24 22:24:48,492 - INFO - STEP 2: Preparing DRL Dataset (Daily OHLCV + Technicals + Greeks)
+2026-02-24 22:24:48,492 - INFO - ======================================================================
+2026-02-24 22:24:48,492 - INFO - 
 Processing Asset 1/2: PETR4
-2026-02-23 22:54:59,660 - INFO -   Aggregated 761162 option rows → 1470 daily records
-2026-02-23 22:54:59,668 - INFO - ✓ OHLCV columns already standardized: open, high, low, close, volume
-2026-02-23 22:54:59,964 - INFO - Added 7 technical indicators
-2026-02-23 22:54:59,964 - INFO - 
+2026-02-24 22:24:49,137 - INFO -   Aggregated 761162 option rows → 1470 daily records
+2026-02-24 22:24:49,144 - INFO - ✓ OHLCV columns already standardized: open, high, low, close, volume
+2026-02-24 22:24:49,469 - INFO - Added 7 technical indicators
+2026-02-24 22:24:49,470 - INFO - 
 Processing Asset 2/2: VALE3
-2026-02-23 22:55:00,865 - INFO -   Aggregated 547370 option rows → 1471 daily records
-2026-02-23 22:55:00,871 - INFO - ✓ OHLCV columns already standardized: open, high, low, close, volume
-2026-02-23 22:55:00,887 - INFO - Added 7 technical indicators
-2026-02-23 22:55:00,890 - INFO - 
+2026-02-24 22:24:50,061 - INFO -   Aggregated 547370 option rows → 1471 daily records
+2026-02-24 22:24:50,065 - INFO - ✓ OHLCV columns already standardized: open, high, low, close, volume
+2026-02-24 22:24:50,074 - INFO - Added 7 technical indicators
+2026-02-24 22:24:50,078 - INFO - 
 ✓ DRL Dataset ready: 1470 trading days
-2026-02-23 22:55:00,890 - INFO -   Columns: 69
-2026-02-23 22:55:00,893 - INFO - 
+2026-02-24 22:24:50,078 - INFO -   Columns: 69
+2026-02-24 22:24:50,079 - INFO - 
 Preparing PINN inference dataset...
-2026-02-23 22:55:00,893 - INFO - 
+2026-02-24 22:24:50,079 - INFO - 
 ======================================================================
-2026-02-23 22:55:00,893 - INFO - STEP 1b: Preparing PINN Dataset (Multi-Index by Date & Asset)
-2026-02-23 22:55:00,893 - INFO - ======================================================================
-2026-02-23 22:55:01,172 - INFO - ✓ PINN Dataset ready: 1308532 total option records
-2026-02-23 22:55:01,274 - INFO -   Unique dates: 1471
-2026-02-23 22:55:01,340 - INFO -   Unique assets: 2
-2026-02-23 22:55:01,340 - INFO - 
+2026-02-24 22:24:50,079 - INFO - STEP 1b: Preparing PINN Dataset (Multi-Index by Date & Asset)
+2026-02-24 22:24:50,081 - INFO - ======================================================================
+2026-02-24 22:24:50,320 - INFO - ✓ PINN Dataset ready: 1308532 total option records
+2026-02-24 22:24:50,392 - INFO -   Unique dates: 1471
+2026-02-24 22:24:50,445 - INFO -   Unique assets: 2
+2026-02-24 22:24:50,445 - INFO - 
+Running PINN batch inference...
+2026-02-24 22:24:50,445 - INFO - 
+======================================================================
+2026-02-24 22:24:50,445 - INFO - STEP 1.5: PINN Feature Enrichment (Market Regime Sensor)
+2026-02-24 22:24:50,446 - INFO - ======================================================================
+2026-02-24 22:24:50,446 - INFO - 
+Integration Architecture:
+2026-02-24 22:24:50,446 - INFO -    REAL Data (30-day window) → PINN LSTM → Heston Params (κ,θ,ξ,ρ)
+2026-02-24 22:24:50,446 - INFO -    These physics parameters enrich DRL agent observations
+2026-02-24 22:24:50,446 - INFO - 
+ Found PINN model: best_model_weights.pth
+2026-02-24 22:24:50,446 - INFO - Initializing PINN Inference Engine...
+2026-02-24 22:24:50,448 - INFO - ✅ Loaded data statistics from D:\UERJ\Programacao_e_Codigos\DRL_ICproject\src\pinn\weights\data_stats.json
+2026-02-24 22:24:50,462 - INFO - ℹ️  Using explicit configuration from src/pinn/config.py for model initialization
+2026-02-24 22:24:50,477 - INFO - ✅ Loaded PINN checkpoint successfully
+2026-02-24 22:24:50,479 - INFO - ✅ PINN InferenceEngine initialized on cpu (cache_size=1000, TTL=3600s)
+2026-02-24 22:24:50,480 - INFO -  PINN Engine initialized
+2026-02-24 22:24:50,480 - INFO - 
+[1/3] Preparing real market data...
+2026-02-24 22:24:50,481 - INFO -     Extracted 1470 days of real market data
+2026-02-24 22:24:50,481 - INFO -      Date range: 2019-12-09 to 2025-12-05
+2026-02-24 22:24:50,482 - INFO -      Price range: $11.29 - $42.90
+2026-02-24 22:24:50,482 - INFO - 
+[2/3] Creating 30-day sliding windows for PINN...
+2026-02-24 22:24:50,699 - INFO -     Generated 1441 sliding windows
+2026-02-24 22:24:50,699 - INFO -      Effective coverage: Days 30 to 1470
+2026-02-24 22:24:50,701 - INFO - 
+[3/3] Running PINN batch inference...
+2026-02-24 22:24:50,701 - INFO -    Inferring: κ (kappa), θ (theta), ξ (xi), ρ (rho)
+2026-02-24 22:24:50,817 - INFO -     Inference complete. Extracted parameters from 1441 windows
+2026-02-24 22:24:50,824 - INFO - 
+======================================================================
+2026-02-24 22:24:50,824 - INFO - PINN Feature Enrichment Complete
+2026-02-24 22:24:50,824 - INFO - ======================================================================
+2026-02-24 22:24:50,824 - INFO - 
+Heston Market Regime Parameters:
+2026-02-24 22:24:50,826 - INFO - 
+ DataFrame enriched with 4 physics-informed features
+2026-02-24 22:24:50,826 - INFO - Final shape: (1470, 73)
+2026-02-24 22:24:50,826 - INFO - 
+ These features enable DRL agent to recognize market regimes:
+2026-02-24 22:24:50,826 - INFO -    • κ (kappa): Volatility Mean-Reversion Speed
+2026-02-24 22:24:50,826 - INFO -    • θ (theta): Long-term Volatility Level
+2026-02-24 22:24:50,826 - INFO -    • ξ (xi):    Volatility of Volatility (Tail Risk)
+2026-02-24 22:24:50,826 - INFO -    • ρ (rho):   Price-Vol Correlation (Leverage Effects)
+2026-02-24 22:24:50,826 - INFO - ======================================================================
+
+2026-02-24 22:24:50,827 - INFO - 
 Validating inputs...
-2026-02-23 22:55:01,346 - INFO - ✓ All input validations passed!
-2026-02-23 22:55:01,346 - INFO - ✓ Input validation passed!
-2026-02-23 22:55:01,346 - INFO - 
+2026-02-24 22:24:50,834 - INFO - ✓ All input validations passed!
+2026-02-24 22:24:50,834 - INFO - ✓ Input validation passed!
+2026-02-24 22:24:50,834 - INFO - 
+Executing Rolling Window Ensemble...
+2026-02-24 22:24:50,834 - INFO - 
 ======================================================================
-2026-02-23 22:55:01,347 - INFO - HYPERPARAMETER OPTIMIZATION: PPO
-2026-02-23 22:55:01,347 - INFO - ======================================================================
-2026-02-23 22:55:01,348 - INFO - Train: 1176 days | Test: 294 days
-2026-02-23 22:55:01,349 - INFO - RegimeDetector initialized:
+2026-02-24 22:24:50,835 - INFO - ROLLING WINDOW ENSEMBLE STRATEGY (Production)
+2026-02-24 22:24:50,835 - INFO - + PINN Features: ENABLED
+2026-02-24 22:24:50,835 - INFO - ======================================================================
+2026-02-24 22:24:50,835 - INFO - PurgedRollingWindowStrategy initialized:
+2026-02-24 22:24:50,836 - INFO -   Training window: 52 weeks (260 days)
+2026-02-24 22:24:50,836 - INFO -   Testing window: 4 weeks (20 days)
+2026-02-24 22:24:50,836 - INFO -   Overlap: 48 weeks (240 days)
+2026-02-24 22:24:50,836 - INFO -   Window shift: 20 days
+2026-02-24 22:24:50,836 - INFO -   ✓ PURGE EMBARGO: 5 trading days gap between train/test
+2026-02-24 22:24:50,836 - INFO -     (Prevents data leakage from serial correlation)
+2026-02-24 22:24:50,836 - INFO -   K-fold validation: False (k=N/A)
+2026-02-24 22:24:50,836 - INFO -   Total data points: 1470
+2026-02-24 22:24:50,836 - INFO - Generating 60 purged rolling windows (embargo=5d)...
+2026-02-24 22:24:50,839 - INFO - 
+======================================================================
+2026-02-24 22:24:50,839 - INFO - Window 0: 2019-12-09 → 2021-02-03
+2026-02-24 22:24:50,839 - INFO - ======================================================================
+2026-02-24 22:24:50,840 - INFO - RegimeDetector initialized:
   Stable threshold (nu): 0.120
   Turbulence threshold (xi): 0.400
   Negative correlation threshold (rho): -0.500
   Recent window: 20 periods
-2026-02-23 22:55:01,350 - INFO - Created B3 TradingEnv: 2 stocks, initial=$100,000, costs=0.05%
-2026-02-23 22:55:01,350 - INFO - RegimeDetector initialized:
+2026-02-24 22:24:50,840 - INFO - Created B3 TradingEnv: 2 stocks, initial=$100,000, costs=0.05%
+2026-02-24 22:24:50,840 - INFO - RegimeDetector initialized:
   Stable threshold (nu): 0.120
   Turbulence threshold (xi): 0.400
   Negative correlation threshold (rho): -0.500
   Recent window: 20 periods
-2026-02-23 22:55:01,351 - INFO - Created B3 TradingEnv: 2 stocks, initial=$100,000, costs=0.05%
-2026-02-23 22:55:01,351 - INFO -  Environments created
-2026-02-23 22:55:01,351 - INFO - 
-Initializing Optuna optimizer for PPO...
-2026-02-23 22:55:01,352 - INFO - Initialized HyperparameterOptimizer for PPO
-2026-02-23 22:55:01,352 - INFO - Running 20 optimization trials...
-2026-02-23 22:55:01,352 - INFO - Starting optimization: 20 trials of PPO
-2026-02-23 22:55:03,480 - INFO - Created PPO agent with learning_rate=5.6115164153345e-05
-2026-02-23 22:55:03,481 - INFO - Training PPO for 10000 steps
-2026-02-23 22:55:06,328 - INFO - Episode 1 ended at day 1175
-2026-02-23 22:55:09,455 - INFO - Episode 2 ended at day 1175
-2026-02-23 22:55:12,574 - INFO - Episode 3 ended at day 1175
-2026-02-23 22:55:25,048 - INFO - Episode 4 ended at day 1175
-2026-02-23 22:55:28,797 - INFO - Episode 5 ended at day 1175
-2026-02-23 22:55:32,250 - INFO - Episode 6 ended at day 1175
-2026-02-23 22:55:49,677 - INFO - Episode 7 ended at day 1175
-2026-02-23 22:55:53,432 - INFO - Episode 8 ended at day 1175
-2026-02-23 22:55:56,799 - INFO - Episode 9 ended at day 1175
-2026-02-23 22:56:00,312 - INFO - Episode 10 ended at day 1175
-2026-02-23 22:56:16,594 - INFO - Episode 12 ended at day 1175
-2026-02-23 22:56:19,349 - INFO - Episode 13 ended at day 1175
-2026-02-23 22:56:22,212 - INFO - Episode 14 ended at day 1175
-2026-02-23 22:56:25,097 - INFO - Episode 15 ended at day 1175
-2026-02-23 22:56:27,965 - INFO - Episode 16 ended at day 1175
-2026-02-23 22:56:27,967 - INFO - Evaluation: mean_reward=0.0000 (±0.0000)
-2026-02-23 22:56:28,048 - INFO - Created PPO agent with learning_rate=2.3102018878452926e-05
-2026-02-23 22:56:28,049 - INFO - Training PPO for 10000 steps
-2026-02-23 22:56:38,265 - INFO - Episode 17 ended at day 1175
-2026-02-23 22:56:50,783 - INFO - Episode 18 ended at day 1175
-2026-02-23 22:57:15,128 - INFO - Episode 19 ended at day 1175
-2026-02-23 22:57:27,597 - INFO - Episode 20 ended at day 1175
-2026-02-23 22:57:39,031 - INFO - Episode 21 ended at day 1175
-2026-02-23 22:57:50,256 - INFO - Episode 22 ended at day 1175
-2026-02-23 22:58:08,641 - INFO - Episode 23 ended at day 1175
-2026-02-23 22:58:19,506 - INFO - Episode 24 ended at day 1175
-2026-02-23 22:58:33,136 - INFO - Episode 26 ended at day 1175
-2026-02-23 22:58:36,752 - INFO - Episode 27 ended at day 1175
-2026-02-23 22:58:40,520 - INFO - Episode 28 ended at day 1175
-2026-02-23 22:58:44,586 - INFO - Episode 29 ended at day 1175
-2026-02-23 22:58:48,798 - INFO - Episode 30 ended at day 1175
-2026-02-23 22:58:48,801 - INFO - Evaluation: mean_reward=2.7797 (±0.0000)
-2026-02-23 22:58:48,884 - INFO - Created PPO agent with learning_rate=0.00015304852121831474
-2026-02-23 22:58:48,885 - INFO - Training PPO for 10000 steps
-2026-02-23 22:58:58,970 - INFO - Episode 31 ended at day 1175
-2026-02-23 22:59:06,988 - INFO - Episode 32 ended at day 1175
-2026-02-23 22:59:14,955 - INFO - Episode 33 ended at day 1175
-2026-02-23 22:59:24,440 - INFO - Episode 34 ended at day 1175
-2026-02-23 22:59:32,841 - INFO - Episode 35 ended at day 1175
-2026-02-23 22:59:40,635 - INFO - Episode 36 ended at day 1175
-2026-02-23 22:59:49,809 - INFO - Episode 37 ended at day 1175
-2026-02-23 22:59:57,534 - INFO - Episode 38 ended at day 1175
-2026-02-23 23:00:07,660 - INFO - Episode 40 ended at day 1175
-2026-02-23 23:00:11,708 - INFO - Episode 41 ended at day 1175
-2026-02-23 23:00:16,020 - INFO - Episode 42 ended at day 1175
-2026-02-23 23:00:19,875 - INFO - Episode 43 ended at day 1175
-2026-02-23 23:00:23,705 - INFO - Episode 44 ended at day 1175
-2026-02-23 23:00:23,706 - INFO - Evaluation: mean_reward=35.3671 (±0.0000)
-2026-02-23 23:00:23,822 - INFO - Created PPO agent with learning_rate=1.1715937392307055e-05
-2026-02-23 23:00:23,823 - INFO - Training PPO for 10000 steps
-2026-02-23 23:00:28,115 - INFO - Episode 45 ended at day 1175
-2026-02-23 23:00:32,708 - INFO - Episode 46 ended at day 1175
-2026-02-23 23:00:37,833 - INFO - Episode 47 ended at day 1175
-2026-02-23 23:01:33,681 - INFO - Episode 48 ended at day 1175
-2026-02-23 23:01:39,100 - INFO - Episode 49 ended at day 1175
-2026-02-23 23:01:43,761 - INFO - Episode 50 ended at day 1175
-2026-02-23 23:02:27,829 - INFO - Episode 51 ended at day 1175
-2026-02-23 23:02:34,014 - INFO - Episode 52 ended at day 1175
-2026-02-23 23:02:39,186 - INFO - Episode 53 ended at day 1175
-2026-02-23 23:02:43,741 - INFO - Episode 54 ended at day 1175
-2026-02-23 23:03:35,243 - INFO - Episode 56 ended at day 1175
-2026-02-23 23:03:40,005 - INFO - Episode 57 ended at day 1175
-2026-02-23 23:03:45,517 - INFO - Episode 58 ended at day 1175
-2026-02-23 23:03:50,616 - INFO - Episode 59 ended at day 1175
-2026-02-23 23:03:55,046 - INFO - Episode 60 ended at day 1175
-2026-02-23 23:03:55,047 - INFO - Evaluation: mean_reward=-12.9219 (±0.0000)
-2026-02-23 23:03:55,147 - INFO - Created PPO agent with learning_rate=1.5030900645056805e-05
-2026-02-23 23:03:55,147 - INFO - Training PPO for 10000 steps
-2026-02-23 23:04:14,691 - INFO - Episode 61 ended at day 1175
-2026-02-23 23:04:35,955 - INFO - Episode 62 ended at day 1175
-2026-02-23 23:04:57,469 - INFO - Episode 63 ended at day 1175
-2026-02-23 23:05:22,039 - INFO - Episode 64 ended at day 1175
-2026-02-23 23:05:42,357 - INFO - Episode 65 ended at day 1175
-2026-02-23 23:06:09,958 - INFO - Episode 66 ended at day 1175
-2026-02-23 23:06:48,364 - INFO - Episode 67 ended at day 1175
-2026-02-23 23:07:12,023 - INFO - Episode 68 ended at day 1175
-2026-02-23 23:07:37,564 - INFO - Episode 70 ended at day 1175
-2026-02-23 23:07:42,380 - INFO - Episode 71 ended at day 1175
-2026-02-23 23:07:47,431 - INFO - Episode 72 ended at day 1175
-2026-02-23 23:07:53,482 - INFO - Episode 73 ended at day 1175
-2026-02-23 23:07:58,494 - INFO - Episode 74 ended at day 1175
-2026-02-23 23:07:58,496 - INFO - Evaluation: mean_reward=36.7477 (±0.0000)
-2026-02-23 23:07:58,497 - INFO - Best trial 4: Sharpe=36.7477
-2026-02-23 23:07:58,498 - INFO - Best params: {'lr': 1.5030900645056805e-05, 'n_steps': 1024, 'batch_size': 32, 'n_epochs': 10, 'gamma': 0.9693949967555051, 'gae_lambda': 0.9244214128596506, 'clip_range': 0.34862125274557887, 'ent_coef': 0.035675332669358926, 'vf_coef': 0.5404672548436904, 'features_dim': 128, 'n_heads': 2, 'n_layers': 3}
-2026-02-23 23:07:58,498 - INFO - 
-======================================================================
-2026-02-23 23:07:58,498 - INFO - OPTIMIZATION RESULTS: PPO
-2026-02-23 23:07:58,499 - INFO - ======================================================================
-2026-02-23 23:07:58,499 - INFO - 
-Best hyperparameters:
-2026-02-23 23:07:58,499 - INFO -   lr: 1.5030900645056805e-05
-2026-02-23 23:07:58,500 - INFO -   n_steps: 1024
-2026-02-23 23:07:58,501 - INFO -   batch_size: 32
-2026-02-23 23:07:58,501 - INFO -   n_epochs: 10
-2026-02-23 23:07:58,501 - INFO -   gamma: 0.9693949967555051
-2026-02-23 23:07:58,502 - INFO -   gae_lambda: 0.9244214128596506
-2026-02-23 23:07:58,502 - INFO -   clip_range: 0.34862125274557887
-2026-02-23 23:07:58,502 - INFO -   ent_coef: 0.035675332669358926
-2026-02-23 23:07:58,503 - INFO -   vf_coef: 0.5404672548436904
-2026-02-23 23:07:58,503 - INFO -   features_dim: 128
-2026-02-23 23:07:58,503 - INFO -   n_heads: 2
-2026-02-23 23:07:58,503 - INFO -   n_layers: 3
-2026-02-23 23:07:58,504 - INFO - 
-Training final model with best hyperparameters...
-2026-02-23 23:07:58,504 - ERROR - Optimization failed: PPOAgent.__init__() got an unexpected keyword argument 'lr'
-2026-02-23 23:07:58,507 - INFO - 
-======================================================================
-2026-02-23 23:07:58,508 - INFO - Pipeline Complete!
-2026-02-23 23:07:58,508 - INFO - End time: 2026-02-23 23:07:58.508408
-2026-02-23 23:07:58,509 - INFO - ======================================================================
+2026-02-24 22:24:50,841 - INFO - Created B3 TradingEnv: 2 stocks, initial=$100,000, costs=0.05%
+2026-02-24 22:24:50,841 - INFO - Training agents...
+2026-02-24 22:24:52,161 - INFO - Created PPO agent with learning_rate=0.0003
+2026-02-24 22:24:52,189 - INFO - Created DDPG agent with learning_rate=0.001
+2026-02-24 22:24:52,214 - INFO - Created A2C agent with learning_rate=0.0007
+2026-02-24 22:24:52,214 - INFO - Configurando SB3 Loggers (CSV/Tensorboard)...
+2026-02-24 22:24:52,221 - INFO - Training agents for 100000 timesteps...
+2026-02-24 22:24:52,224 - INFO - Training PPO for 100000 steps
+2026-02-24 22:24:52,243 - INFO - [Curriculum] Multiplicador de Custos: 0.00
+2026-02-24 22:24:52,579 - INFO - Episode 1 ended at day 259
+2026-02-24 22:24:52,878 - INFO - Episode 2 ended at day 259
+2026-02-24 22:24:53,194 - INFO - Episode 3 ended at day 259
+2026-02-24 22:24:53,559 - INFO - Episode 4 ended at day 259
+2026-02-24 22:24:53,881 - INFO - Episode 5 ended at day 259
+2026-02-24 22:24:54,217 - INFO - Episode 6 ended at day 259
+2026-02-24 22:24:54,558 - INFO - Episode 7 ended at day 259
+2026-02-24 22:24:59,430 - INFO - Episode 8 ended at day 259
+2026-02-24 22:24:59,732 - INFO - Episode 9 ended at day 259
+2026-02-24 22:25:00,044 - INFO - Episode 10 ended at day 259
+2026-02-24 22:25:00,344 - INFO - Episode 11 ended at day 259
+2026-02-24 22:25:00,651 - INFO - Episode 12 ended at day 259
+2026-02-24 22:25:00,967 - INFO - Episode 13 ended at day 259
+2026-02-24 22:25:01,259 - INFO - Episode 14 ended at day 259
+2026-02-24 22:25:01,564 - INFO - Episode 15 ended at day 259
+2026-02-24 22:25:06,239 - INFO - Episode 16 ended at day 259
+2026-02-24 22:25:06,626 - INFO - Episode 17 ended at day 259
+2026-02-24 22:25:06,972 - INFO - Episode 18 ended at day 259
+2026-02-24 22:25:07,273 - INFO - Episode 19 ended at day 259
+2026-02-24 22:25:07,590 - INFO - Episode 20 ended at day 259
+2026-02-24 22:25:07,904 - INFO - Episode 21 ended at day 259
+2026-02-24 22:25:08,211 - INFO - Episode 22 ended at day 259
+2026-02-24 22:25:08,521 - INFO - Episode 23 ended at day 259
+2026-02-24 22:25:13,124 - INFO - Episode 24 ended at day 259
+2026-02-24 22:25:13,438 - INFO - Episode 25 ended at day 259
+2026-02-24 22:25:13,745 - INFO - Episode 26 ended at day 259
+2026-02-24 22:25:14,058 - INFO - Episode 27 ended at day 259
+2026-02-24 22:25:14,367 - INFO - Episode 28 ended at day 259
+2026-02-24 22:25:14,693 - INFO - Episode 29 ended at day 259
+2026-02-24 22:25:15,060 - INFO - Episode 30 ended at day 259
+2026-02-24 22:25:15,416 - INFO - Episode 31 ended at day 259
+2026-02-24 22:25:20,705 - INFO - Episode 32 ended at day 259
+2026-02-24 22:25:21,099 - INFO - Episode 33 ended at day 259
+2026-02-24 22:25:21,463 - INFO - Episode 34 ended at day 259
+2026-02-24 22:25:21,831 - INFO - Episode 35 ended at day 259
+2026-02-24 22:25:22,192 - INFO - Episode 36 ended at day 259
+2026-02-24 22:25:22,562 - INFO - Episode 37 ended at day 259
+2026-02-24 22:25:22,936 - INFO - Episode 38 ended at day 259
+2026-02-24 22:25:23,317 - INFO - Episode 39 ended at day 259
+2026-02-24 22:25:28,961 - INFO - Episode 40 ended at day 259
+2026-02-24 22:25:29,334 - INFO - Episode 41 ended at day 259
+2026-02-24 22:25:29,711 - INFO - Episode 42 ended at day 259
+2026-02-24 22:25:30,134 - INFO - Episode 43 ended at day 259
+2026-02-24 22:25:30,591 - INFO - Episode 44 ended at day 259
+2026-02-24 22:25:31,009 - INFO - Episode 45 ended at day 259
+2026-02-24 22:25:31,410 - INFO - Episode 46 ended at day 259
+2026-02-24 22:25:31,779 - INFO - Episode 47 ended at day 259
+2026-02-24 22:25:37,784 - INFO - Episode 48 ended at day 259
+2026-02-24 22:25:38,211 - INFO - Episode 49 ended at day 259
+2026-02-24 22:25:38,785 - INFO - Episode 50 ended at day 259
+2026-02-24 22:25:39,237 - INFO - Episode 51 ended at day 259
+2026-02-24 22:25:39,660 - INFO - Episode 52 ended at day 259
+2026-02-24 22:25:40,058 - INFO - Episode 53 ended at day 259
+2026-02-24 22:25:40,455 - INFO - Episode 54 ended at day 259
+2026-02-24 22:25:40,871 - INFO - Episode 55 ended at day 259
+2026-02-24 22:25:48,728 - INFO - Episode 56 ended at day 259
+2026-02-24 22:25:49,274 - INFO - Episode 57 ended at day 259
+2026-02-24 22:25:49,718 - INFO - Episode 58 ended at day 259
+2026-02-24 22:25:50,170 - INFO - Episode 59 ended at day 259
+2026-02-24 22:25:50,613 - INFO - Episode 60 ended at day 259
+2026-02-24 22:25:51,062 - INFO - Episode 61 ended at day 259
+2026-02-24 22:25:51,548 - INFO - Episode 62 ended at day 259
+2026-02-24 22:25:52,041 - INFO - Episode 63 ended at day 259
+2026-02-24 22:25:58,996 - INFO - Episode 64 ended at day 259
+2026-02-24 22:25:59,476 - INFO - Episode 65 ended at day 259
+2026-02-24 22:25:59,984 - INFO - Episode 66 ended at day 259
+2026-02-24 22:26:00,520 - INFO - Episode 67 ended at day 259
+2026-02-24 22:26:00,988 - INFO - Episode 68 ended at day 259
+2026-02-24 22:26:01,437 - INFO - Episode 69 ended at day 259
+2026-02-24 22:26:01,908 - INFO - Episode 70 ended at day 259
+2026-02-24 22:26:02,469 - INFO - Episode 71 ended at day 259
+2026-02-24 22:26:10,139 - INFO - Episode 72 ended at day 259
+2026-02-24 22:26:10,606 - INFO - Episode 73 ended at day 259
+2026-02-24 22:26:11,056 - INFO - Episode 74 ended at day 259
+2026-02-24 22:26:11,495 - INFO - Episode 75 ended at day 259
+2026-02-24 22:26:11,939 - INFO - Episode 76 ended at day 259
+2026-02-24 22:26:12,406 - INFO - Episode 77 ended at day 259
+2026-02-24 22:26:12,874 - INFO - Episode 78 ended at day 259
+2026-02-24 22:26:13,352 - INFO - Episode 79 ended at day 259
+2026-02-24 22:26:20,888 - INFO - Episode 80 ended at day 259
+2026-02-24 22:26:21,402 - INFO - Episode 81 ended at day 259
+2026-02-24 22:26:21,842 - INFO - Episode 82 ended at day 259
+2026-02-24 22:26:22,287 - INFO - Episode 83 ended at day 259
+2026-02-24 22:26:22,746 - INFO - Episode 84 ended at day 259
+2026-02-24 22:26:23,200 - INFO - Episode 85 ended at day 259
+2026-02-24 22:26:23,636 - INFO - Episode 86 ended at day 259
+2026-02-24 22:26:30,053 - INFO - Episode 87 ended at day 259
+2026-02-24 22:26:30,554 - INFO - Episode 88 ended at day 259
+2026-02-24 22:26:31,062 - INFO - Episode 89 ended at day 259
+2026-02-24 22:26:31,538 - INFO - Episode 90 ended at day 259
+2026-02-24 22:26:31,951 - INFO - Episode 91 ended at day 259
+2026-02-24 22:26:32,504 - INFO - Episode 92 ended at day 259
+2026-02-24 22:26:33,072 - INFO - Episode 93 ended at day 259
+2026-02-24 22:26:33,630 - INFO - Episode 94 ended at day 259
+2026-02-24 22:26:45,354 - INFO - Episode 95 ended at day 259
+2026-02-24 22:26:46,275 - INFO - Episode 96 ended at day 259
+2026-02-24 22:26:47,101 - INFO - Episode 97 ended at day 259
+2026-02-24 22:26:47,915 - INFO - Episode 98 ended at day 259
+2026-02-24 22:26:48,765 - INFO - Episode 99 ended at day 259
+2026-02-24 22:26:48,973 - INFO - [Curriculum] Multiplicador de Custos: 0.10
+2026-02-24 22:26:49,576 - INFO - Episode 100 ended at day 259
+2026-02-24 22:26:50,364 - INFO - Episode 101 ended at day 259
+2026-02-24 22:26:51,209 - INFO - Episode 102 ended at day 259
+2026-02-24 22:27:04,099 - INFO - Episode 103 ended at day 259
+2026-02-24 22:27:05,198 - INFO - Episode 104 ended at day 259
+2026-02-24 22:27:06,187 - INFO - Episode 105 ended at day 259
+2026-02-24 22:27:07,164 - INFO - Episode 106 ended at day 259
+2026-02-24 22:27:08,184 - INFO - Episode 107 ended at day 259
+2026-02-24 22:27:09,293 - INFO - Episode 108 ended at day 259
+2026-02-24 22:27:10,346 - INFO - Episode 109 ended at day 259
+2026-02-24 22:27:11,372 - INFO - Episode 110 ended at day 259
+2026-02-24 22:27:25,757 - INFO - Episode 111 ended at day 259
+2026-02-24 22:27:26,651 - INFO - Episode 112 ended at day 259
+2026-02-24 22:27:27,699 - INFO - Episode 113 ended at day 259
+2026-02-24 22:27:28,620 - INFO - Episode 114 ended at day 259
+2026-02-24 22:27:29,591 - INFO - Episode 115 ended at day 259
+2026-02-24 22:27:30,637 - INFO - Episode 116 ended at day 259
+2026-02-24 22:27:31,709 - INFO - Episode 117 ended at day 259
+2026-02-24 22:27:32,770 - INFO - Episode 118 ended at day 259
+2026-02-24 22:27:47,361 - INFO - Episode 119 ended at day 259
+2026-02-24 22:27:48,316 - INFO - Episode 120 ended at day 259
+2026-02-24 22:27:49,358 - INFO - Episode 121 ended at day 259
+2026-02-24 22:27:50,428 - INFO - Episode 122 ended at day 259
+2026-02-24 22:27:50,828 - INFO - [Curriculum] Multiplicador de Custos: 0.20
+2026-02-24 22:27:51,487 - INFO - Episode 123 ended at day 259
+2026-02-24 22:27:52,516 - INFO - Episode 124 ended at day 259
+2026-02-24 22:27:53,502 - INFO - Episode 125 ended at day 259
+2026-02-24 22:27:54,707 - INFO - Episode 126 ended at day 259
+2026-02-24 22:28:09,632 - INFO - Episode 127 ended at day 259
+2026-02-24 22:28:10,638 - INFO - Episode 128 ended at day 259
+2026-02-24 22:28:11,684 - INFO - Episode 129 ended at day 259
+2026-02-24 22:28:12,688 - INFO - Episode 130 ended at day 259
+2026-02-24 22:28:13,696 - INFO - Episode 131 ended at day 259
+2026-02-24 22:28:14,726 - INFO - Episode 132 ended at day 259
+2026-02-24 22:28:15,742 - INFO - Episode 133 ended at day 259
+2026-02-24 22:28:16,771 - INFO - Episode 134 ended at day 259
+2026-02-24 22:28:31,493 - INFO - Episode 135 ended at day 259
+2026-02-24 22:28:32,567 - INFO - Episode 136 ended at day 259
+2026-02-24 22:28:33,682 - INFO - Episode 137 ended at day 259
+2026-02-24 22:28:34,821 - INFO - Episode 138 ended at day 259
+2026-02-24 22:28:35,837 - INFO - Episode 139 ended at day 259
+2026-02-24 22:28:36,882 - INFO - Episode 140 ended at day 259
+2026-02-24 22:28:37,883 - INFO - Episode 141 ended at day 259
+2026-02-24 22:28:38,924 - INFO - Episode 142 ended at day 259
+2026-02-24 22:28:53,146 - INFO - Episode 143 ended at day 259
+2026-02-24 22:28:54,269 - INFO - Episode 144 ended at day 259
+2026-02-24 22:28:55,361 - INFO - Episode 145 ended at day 259
+2026-02-24 22:28:56,506 - INFO - Episode 146 ended at day 259
+2026-02-24 22:28:57,561 - INFO - Episode 147 ended at day 259
+2026-02-24 22:28:58,435 - INFO - [Curriculum] Multiplicador de Custos: 0.31
+2026-02-24 22:28:58,555 - INFO - Episode 148 ended at day 259
+2026-02-24 22:28:59,592 - INFO - Episode 149 ended at day 259
+2026-02-24 22:29:00,748 - INFO - Episode 150 ended at day 259
+2026-02-24 22:29:15,309 - INFO - Episode 151 ended at day 259
+2026-02-24 22:29:16,299 - INFO - Episode 152 ended at day 259
+2026-02-24 22:29:17,329 - INFO - Episode 153 ended at day 259
+2026-02-24 22:29:18,309 - INFO - Episode 154 ended at day 259
+2026-02-24 22:29:19,369 - INFO - Episode 155 ended at day 259
+2026-02-24 22:29:20,388 - INFO - Episode 156 ended at day 259
+2026-02-24 22:29:21,526 - INFO - Episode 157 ended at day 259
+2026-02-24 22:29:22,608 - INFO - Episode 158 ended at day 259
+2026-02-24 22:29:37,428 - INFO - Episode 159 ended at day 259
+2026-02-24 22:29:38,430 - INFO - Episode 160 ended at day 259
+2026-02-24 22:29:39,555 - INFO - Episode 161 ended at day 259
+2026-02-24 22:29:40,647 - INFO - Episode 162 ended at day 259
+2026-02-24 22:29:41,702 - INFO - Episode 163 ended at day 259
+2026-02-24 22:29:42,750 - INFO - Episode 164 ended at day 259
+2026-02-24 22:29:43,857 - INFO - Episode 165 ended at day 259
+2026-02-24 22:29:44,909 - INFO - Episode 166 ended at day 259
+2026-02-24 22:29:59,304 - INFO - Episode 167 ended at day 259
+2026-02-24 22:30:00,268 - INFO - Episode 168 ended at day 259
+2026-02-24 22:30:01,304 - INFO - Episode 169 ended at day 259
+2026-02-24 22:30:02,287 - INFO - Episode 170 ended at day 259
+2026-02-24 22:30:03,224 - INFO - Episode 171 ended at day 259
+2026-02-24 22:30:04,299 - INFO - Episode 172 ended at day 259
+2026-02-24 22:30:05,326 - INFO - Episode 173 ended at day 259
+2026-02-24 22:30:05,722 - INFO - [Curriculum] Multiplicador de Custos: 0.42
+2026-02-24 22:30:20,016 - INFO - Episode 174 ended at day 259
+2026-02-24 22:30:21,118 - INFO - Episode 175 ended at day 259
+2026-02-24 22:30:22,230 - INFO - Episode 176 ended at day 259
+2026-02-24 22:30:23,226 - INFO - Episode 177 ended at day 259
+2026-02-24 22:30:24,220 - INFO - Episode 178 ended at day 259
+2026-02-24 22:30:25,267 - INFO - Episode 179 ended at day 259
+2026-02-24 22:30:26,265 - INFO - Episode 180 ended at day 259
+2026-02-24 22:30:27,334 - INFO - Episode 181 ended at day 259
+2026-02-24 22:30:41,976 - INFO - Episode 182 ended at day 259
+2026-02-24 22:30:43,006 - INFO - Episode 183 ended at day 259
+2026-02-24 22:30:44,028 - INFO - Episode 184 ended at day 259
+2026-02-24 22:30:45,103 - INFO - Episode 185 ended at day 259
+2026-02-24 22:30:46,170 - INFO - Episode 186 ended at day 259
+2026-02-24 22:30:47,198 - INFO - Episode 187 ended at day 259
+2026-02-24 22:30:48,274 - INFO - Episode 188 ended at day 259
+2026-02-24 22:30:49,202 - INFO - Episode 189 ended at day 259
+2026-02-24 22:31:03,044 - INFO - Episode 190 ended at day 259
+2026-02-24 22:31:03,932 - INFO - Episode 191 ended at day 259
+2026-02-24 22:31:04,811 - INFO - Episode 192 ended at day 259
+2026-02-24 22:31:05,678 - INFO - Episode 193 ended at day 259
+2026-02-24 22:31:06,591 - INFO - Episode 194 ended at day 259
+2026-02-24 22:31:07,527 - INFO - Episode 195 ended at day 259
+2026-02-24 22:31:08,673 - INFO - Episode 196 ended at day 259
+2026-02-24 22:31:09,120 - INFO - [Curriculum] Multiplicador de Custos: 0.52
+2026-02-24 22:31:09,611 - INFO - Episode 197 ended at day 259
+2026-02-24 22:31:23,316 - INFO - Episode 198 ended at day 259
+2026-02-24 22:31:24,270 - INFO - Episode 199 ended at day 259
+2026-02-24 22:31:25,237 - INFO - Episode 200 ended at day 259
+2026-02-24 22:31:26,255 - INFO - Episode 201 ended at day 259
+2026-02-24 22:31:27,219 - INFO - Episode 202 ended at day 259
+2026-02-24 22:31:28,236 - INFO - Episode 203 ended at day 259
+2026-02-24 22:31:29,308 - INFO - Episode 204 ended at day 259
+2026-02-24 22:31:30,318 - INFO - Episode 205 ended at day 259
+2026-02-24 22:31:45,348 - INFO - Episode 206 ended at day 259
+2026-02-24 22:31:46,363 - INFO - Episode 207 ended at day 259
+2026-02-24 22:31:47,358 - INFO - Episode 208 ended at day 259
+2026-02-24 22:31:48,362 - INFO - Episode 209 ended at day 259
+2026-02-24 22:31:49,396 - INFO - Episode 210 ended at day 259
+2026-02-24 22:31:50,342 - INFO - Episode 211 ended at day 259
+2026-02-24 22:31:51,330 - INFO - Episode 212 ended at day 259
+2026-02-24 22:31:52,276 - INFO - Episode 213 ended at day 259
+2026-02-24 22:32:06,635 - INFO - Episode 214 ended at day 259
+2026-02-24 22:32:07,593 - INFO - Episode 215 ended at day 259
+2026-02-24 22:32:08,571 - INFO - Episode 216 ended at day 259
+2026-02-24 22:32:09,671 - INFO - Episode 217 ended at day 259
+2026-02-24 22:32:10,581 - INFO - Episode 218 ended at day 259
+2026-02-24 22:32:11,487 - INFO - Episode 219 ended at day 259
+2026-02-24 22:32:12,083 - INFO - [Curriculum] Multiplicador de Custos: 0.62
+2026-02-24 22:32:12,368 - INFO - Episode 220 ended at day 259
+2026-02-24 22:32:13,330 - INFO - Episode 221 ended at day 259
+2026-02-24 22:32:26,914 - INFO - Episode 222 ended at day 259
+2026-02-24 22:32:27,827 - INFO - Episode 223 ended at day 259
+2026-02-24 22:32:28,769 - INFO - Episode 224 ended at day 259
+2026-02-24 22:32:29,790 - INFO - Episode 225 ended at day 259
+2026-02-24 22:32:30,726 - INFO - Episode 226 ended at day 259
+2026-02-24 22:32:31,784 - INFO - Episode 227 ended at day 259
+2026-02-24 22:32:32,851 - INFO - Episode 228 ended at day 259
+2026-02-24 22:32:33,907 - INFO - Episode 229 ended at day 259
+2026-02-24 22:32:48,192 - INFO - Episode 230 ended at day 259
+2026-02-24 22:32:49,343 - INFO - Episode 231 ended at day 259
+2026-02-24 22:32:50,311 - INFO - Episode 232 ended at day 259
+2026-02-24 22:32:51,317 - INFO - Episode 233 ended at day 259
+2026-02-24 22:32:52,343 - INFO - Episode 234 ended at day 259
+2026-02-24 22:32:53,293 - INFO - Episode 235 ended at day 259
+2026-02-24 22:32:54,302 - INFO - Episode 236 ended at day 259
+2026-02-24 22:32:55,369 - INFO - Episode 237 ended at day 259
+2026-02-24 22:33:09,535 - INFO - Episode 238 ended at day 259
+2026-02-24 22:33:10,548 - INFO - Episode 239 ended at day 259
+2026-02-24 22:33:11,514 - INFO - Episode 240 ended at day 259
+2026-02-24 22:33:12,457 - INFO - Episode 241 ended at day 259
+2026-02-24 22:33:13,537 - INFO - Episode 242 ended at day 259
+2026-02-24 22:33:14,366 - INFO - [Curriculum] Multiplicador de Custos: 0.72
+2026-02-24 22:33:14,506 - INFO - Episode 243 ended at day 259
+2026-02-24 22:33:15,357 - INFO - Episode 244 ended at day 259
+2026-02-24 22:33:16,293 - INFO - Episode 245 ended at day 259
+2026-02-24 22:33:29,206 - INFO - Episode 246 ended at day 259
+2026-02-24 22:33:30,178 - INFO - Episode 247 ended at day 259
+2026-02-24 22:33:31,129 - INFO - Episode 248 ended at day 259
+2026-02-24 22:33:32,099 - INFO - Episode 249 ended at day 259
+2026-02-24 22:33:33,013 - INFO - Episode 250 ended at day 259
+2026-02-24 22:33:34,008 - INFO - Episode 251 ended at day 259
+2026-02-24 22:33:34,845 - INFO - Episode 252 ended at day 259
+2026-02-24 22:33:35,699 - INFO - Episode 253 ended at day 259
+2026-02-24 22:33:49,999 - INFO - Episode 254 ended at day 259
+2026-02-24 22:33:50,887 - INFO - Episode 255 ended at day 259
+2026-02-24 22:33:51,904 - INFO - Episode 256 ended at day 259
+2026-02-24 22:33:53,006 - INFO - Episode 257 ended at day 259
+2026-02-24 22:33:53,927 - INFO - Episode 258 ended at day 259
+2026-02-24 22:33:54,924 - INFO - Episode 259 ended at day 259
+2026-02-24 22:33:55,980 - INFO - Episode 260 ended at day 259
+2026-02-24 22:34:10,459 - INFO - Episode 261 ended at day 259
+2026-02-24 22:34:11,522 - INFO - Episode 262 ended at day 259
+2026-02-24 22:34:12,611 - INFO - Episode 263 ended at day 259
+2026-02-24 22:34:13,687 - INFO - Episode 264 ended at day 259
+2026-02-24 22:34:14,698 - INFO - Episode 265 ended at day 259
+2026-02-24 22:34:15,669 - INFO - Episode 266 ended at day 259
+2026-02-24 22:34:15,696 - INFO - [Curriculum] Multiplicador de Custos: 0.82
+2026-02-24 22:34:16,652 - INFO - Episode 267 ended at day 259
+2026-02-24 22:34:17,582 - INFO - Episode 268 ended at day 259
+2026-02-24 22:34:31,774 - INFO - Episode 269 ended at day 259
+2026-02-24 22:34:32,746 - INFO - Episode 270 ended at day 259
+2026-02-24 22:34:33,607 - INFO - Episode 271 ended at day 259
+2026-02-24 22:34:34,588 - INFO - Episode 272 ended at day 259
+2026-02-24 22:34:35,507 - INFO - Episode 273 ended at day 259
+2026-02-24 22:34:36,517 - INFO - Episode 274 ended at day 259
+2026-02-24 22:34:37,366 - INFO - Episode 275 ended at day 259
+2026-02-24 22:34:38,381 - INFO - Episode 276 ended at day 259
+2026-02-24 22:34:50,983 - INFO - Episode 277 ended at day 259
+2026-02-24 22:34:51,841 - INFO - Episode 278 ended at day 259
+2026-02-24 22:34:52,671 - INFO - Episode 279 ended at day 259
+2026-02-24 22:34:53,578 - INFO - Episode 280 ended at day 259
+2026-02-24 22:34:54,415 - INFO - Episode 281 ended at day 259
+2026-02-24 22:34:55,246 - INFO - Episode 282 ended at day 259
+2026-02-24 22:34:56,045 - INFO - Episode 283 ended at day 259
+2026-02-24 22:34:56,899 - INFO - Episode 284 ended at day 259
+2026-02-24 22:35:09,976 - INFO - Episode 285 ended at day 259
+2026-02-24 22:35:10,933 - INFO - Episode 286 ended at day 259
+2026-02-24 22:35:11,904 - INFO - Episode 287 ended at day 259
+2026-02-24 22:35:12,809 - INFO - Episode 288 ended at day 259
+2026-02-24 22:35:13,831 - INFO - Episode 289 ended at day 259
+2026-02-24 22:35:14,030 - INFO - [Curriculum] Multiplicador de Custos: 0.92
+2026-02-24 22:35:14,817 - INFO - Episode 290 ended at day 259
+2026-02-24 22:35:15,881 - INFO - Episode 291 ended at day 259
+2026-02-24 22:35:16,891 - INFO - Episode 292 ended at day 259
+2026-02-24 22:35:31,033 - INFO - Episode 293 ended at day 259
+2026-02-24 22:35:32,055 - INFO - Episode 294 ended at day 259
+2026-02-24 22:35:33,052 - INFO - Episode 295 ended at day 259
+2026-02-24 22:35:34,048 - INFO - Episode 296 ended at day 259
+2026-02-24 22:35:35,081 - INFO - Episode 297 ended at day 259
+2026-02-24 22:35:36,087 - INFO - Episode 298 ended at day 259
+2026-02-24 22:35:37,072 - INFO - Episode 299 ended at day 259
+2026-02-24 22:35:38,154 - INFO - Episode 300 ended at day 259
+2026-02-24 22:35:52,405 - INFO - Episode 301 ended at day 259
+2026-02-24 22:35:53,483 - INFO - Episode 302 ended at day 259
+2026-02-24 22:35:54,558 - INFO - Episode 303 ended at day 259
+2026-02-24 22:35:55,517 - INFO - Episode 304 ended at day 259
+2026-02-24 22:35:56,690 - INFO - Episode 305 ended at day 259
+2026-02-24 22:35:57,643 - INFO - Episode 306 ended at day 259
+2026-02-24 22:35:58,585 - INFO - Episode 307 ended at day 259
+2026-02-24 22:35:59,581 - INFO - Episode 308 ended at day 259
+2026-02-24 22:36:12,922 - INFO - [Curriculum] Multiplicador de Custos: 1.00
+2026-02-24 22:36:13,024 - INFO - Episode 309 ended at day 259
+2026-02-24 22:36:13,904 - INFO - Episode 310 ended at day 259
+2026-02-24 22:36:14,760 - INFO - Episode 311 ended at day 259
+2026-02-24 22:36:15,623 - INFO - Episode 312 ended at day 259
+2026-02-24 22:36:16,506 - INFO - Episode 313 ended at day 259
+2026-02-24 22:36:17,382 - INFO - Episode 314 ended at day 259
+2026-02-24 22:36:18,231 - INFO - Episode 315 ended at day 259
+2026-02-24 22:36:19,124 - INFO - Episode 316 ended at day 259
+2026-02-24 22:36:32,223 - INFO - Episode 317 ended at day 259
+2026-02-24 22:36:33,189 - INFO - Episode 318 ended at day 259
+2026-02-24 22:36:34,061 - INFO - Episode 319 ended at day 259
+2026-02-24 22:36:35,091 - INFO - Episode 320 ended at day 259
+2026-02-24 22:36:36,163 - INFO - Episode 321 ended at day 259
+2026-02-24 22:36:37,140 - INFO - Episode 322 ended at day 259
+2026-02-24 22:36:38,073 - INFO - Episode 323 ended at day 259
+2026-02-24 22:36:39,047 - INFO - Episode 324 ended at day 259
+2026-02-24 22:36:53,097 - INFO - Episode 325 ended at day 259
+2026-02-24 22:36:54,204 - INFO - Episode 326 ended at day 259
+2026-02-24 22:36:55,404 - INFO - Episode 327 ended at day 259
+2026-02-24 22:36:56,579 - INFO - Episode 328 ended at day 259
+2026-02-24 22:36:57,674 - INFO - Episode 329 ended at day 259
+2026-02-24 22:36:58,796 - INFO - Episode 330 ended at day 259
+2026-02-24 22:36:59,906 - INFO - Episode 331 ended at day 259
+2026-02-24 22:37:01,016 - INFO - Episode 332 ended at day 259
+2026-02-24 22:37:15,374 - INFO - Episode 333 ended at day 259
+2026-02-24 22:37:16,529 - INFO - Episode 334 ended at day 259
+2026-02-24 22:37:17,645 - INFO - Episode 335 ended at day 259
+2026-02-24 22:37:18,643 - INFO - Episode 336 ended at day 259
+2026-02-24 22:37:19,634 - INFO - Episode 337 ended at day 259
+2026-02-24 22:37:20,699 - INFO - Episode 338 ended at day 259
+2026-02-24 22:37:21,699 - INFO - Episode 339 ended at day 259
+2026-02-24 22:37:22,595 - INFO - Episode 340 ended at day 259
+2026-02-24 22:37:35,927 - INFO - Episode 341 ended at day 259
+2026-02-24 22:37:36,730 - INFO - Episode 342 ended at day 259
+2026-02-24 22:37:37,654 - INFO - Episode 343 ended at day 259
+2026-02-24 22:37:38,516 - INFO - Episode 344 ended at day 259
+2026-02-24 22:37:39,487 - INFO - Episode 345 ended at day 259
+2026-02-24 22:37:40,376 - INFO - Episode 346 ended at day 259
+2026-02-24 22:37:41,280 - INFO - Episode 347 ended at day 259
+2026-02-24 22:37:53,826 - INFO - Episode 348 ended at day 259
+2026-02-24 22:37:54,731 - INFO - Episode 349 ended at day 259
+2026-02-24 22:37:55,650 - INFO - Episode 350 ended at day 259
+2026-02-24 22:37:56,519 - INFO - Episode 351 ended at day 259
+2026-02-24 22:37:57,411 - INFO - Episode 352 ended at day 259
+2026-02-24 22:37:58,253 - INFO - Episode 353 ended at day 259
+2026-02-24 22:37:59,129 - INFO - Episode 354 ended at day 259
+2026-02-24 22:38:00,108 - INFO - Episode 355 ended at day 259
+2026-02-24 22:38:13,813 - INFO - Episode 356 ended at day 259
+2026-02-24 22:38:14,830 - INFO - Episode 357 ended at day 259
+2026-02-24 22:38:15,909 - INFO - Episode 358 ended at day 259
+2026-02-24 22:38:16,935 - INFO - Episode 359 ended at day 259
+2026-02-24 22:38:17,917 - INFO - Episode 360 ended at day 259
+2026-02-24 22:38:18,943 - INFO - Episode 361 ended at day 259
+2026-02-24 22:38:19,979 - INFO - Episode 362 ended at day 259
+2026-02-24 22:38:21,054 - INFO - Episode 363 ended at day 259
+2026-02-24 22:38:35,288 - INFO - Episode 364 ended at day 259
+2026-02-24 22:38:36,295 - INFO - Episode 365 ended at day 259
+2026-02-24 22:38:37,282 - INFO - Episode 366 ended at day 259
+2026-02-24 22:38:38,364 - INFO - Episode 367 ended at day 259
+2026-02-24 22:38:39,526 - INFO - Episode 368 ended at day 259
+2026-02-24 22:38:40,684 - INFO - Episode 369 ended at day 259
+2026-02-24 22:38:41,736 - INFO - Episode 370 ended at day 259
+2026-02-24 22:38:42,871 - INFO - Episode 371 ended at day 259
+2026-02-24 22:38:56,851 - INFO - Episode 372 ended at day 259
+2026-02-24 22:38:57,875 - INFO - Episode 373 ended at day 259
+2026-02-24 22:38:58,769 - INFO - Episode 374 ended at day 259
+2026-02-24 22:38:59,742 - INFO - Episode 375 ended at day 259
+2026-02-24 22:39:00,652 - INFO - Episode 376 ended at day 259
+2026-02-24 22:39:01,536 - INFO - Episode 377 ended at day 259
+2026-02-24 22:39:02,461 - INFO - Episode 378 ended at day 259
+2026-02-24 22:39:03,344 - INFO - Episode 379 ended at day 259
+2026-02-24 22:39:16,018 - INFO - Episode 380 ended at day 259
+2026-02-24 22:39:16,905 - INFO - Episode 381 ended at day 259
+2026-02-24 22:39:17,791 - INFO - Episode 382 ended at day 259
+2026-02-24 22:39:18,737 - INFO - Episode 383 ended at day 259
+2026-02-24 22:39:19,629 - INFO - Episode 384 ended at day 259
+2026-02-24 22:39:20,718 - INFO - Episode 385 ended at day 259
+2026-02-24 22:39:21,575 - INFO - Episode 386 ended at day 259
+2026-02-24 22:39:22,430 - INFO - Episode 387 ended at day 259
+2026-02-24 22:39:35,330 - INFO - Training DDPG for 100000 steps
+2026-02-24 22:39:35,776 - INFO - Episode 389 ended at day 259
+2026-02-24 22:39:36,096 - INFO - Episode 390 ended at day 259
+2026-02-24 22:39:36,376 - INFO - Episode 391 ended at day 259
+2026-02-24 22:39:40,591 - INFO - Episode 392 ended at day 259
+2026-02-24 22:40:13,535 - INFO - Episode 393 ended at day 259
+2026-02-24 22:40:42,882 - INFO - Episode 394 ended at day 259
+2026-02-24 22:41:14,032 - INFO - Episode 395 ended at day 259
+2026-02-24 22:41:48,045 - INFO - Episode 396 ended at day 259
+2026-02-24 22:42:19,355 - INFO - Episode 397 ended at day 259
+2026-02-24 22:42:53,083 - INFO - Episode 398 ended at day 259
+2026-02-24 22:43:24,812 - INFO - Episode 399 ended at day 259
+2026-02-24 22:43:56,803 - INFO - Episode 400 ended at day 259
+2026-02-24 22:44:30,375 - INFO - Episode 401 ended at day 259
+2026-02-24 22:45:01,312 - INFO - Episode 402 ended at day 259
+2026-02-24 22:45:34,830 - INFO - Episode 403 ended at day 259
+2026-02-24 22:46:07,993 - INFO - Episode 404 ended at day 259

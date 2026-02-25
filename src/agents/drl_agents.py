@@ -107,6 +107,7 @@ class PPOAgent(BaseDRLAgent):
         save_dir: Optional[Path] = None,
         eval_freq: int = 10_000,
         n_eval_episodes: int = 5,
+        custom_callbacks: Optional[list] = None,
     ) -> None:
         """
         Train PPO agent.
@@ -118,10 +119,10 @@ class PPOAgent(BaseDRLAgent):
             eval_freq: Evaluation frequency (steps)
             n_eval_episodes: Episodes per evaluation
         """
-        callback = None
+        callbacks = []
         
         if callback_type == "callback" and save_dir:
-            callback = EvalCallback(
+            callbacks.append(EvalCallback(
                 eval_env=self.env,
                 n_eval_episodes=n_eval_episodes,
                 eval_freq=eval_freq,
@@ -129,7 +130,12 @@ class PPOAgent(BaseDRLAgent):
                 best_model_save_path=str(save_dir),
                 deterministic=True,
                 render=False,
-            )
+            ))
+            
+        if custom_callbacks:
+            callbacks.extend(custom_callbacks)
+            
+        callback = callbacks if callbacks else None
         
         logger.info(f"Training PPO for {total_timesteps} steps")
         self.model.learn(
@@ -249,6 +255,7 @@ class DDPGAgent(BaseDRLAgent):
         save_dir: Optional[Path] = None,
         eval_freq: int = 10_000,
         n_eval_episodes: int = 5,
+        custom_callbacks: Optional[list] = None,
     ) -> None:
         """
         Train DDPG agent.
@@ -260,10 +267,10 @@ class DDPGAgent(BaseDRLAgent):
             eval_freq: Evaluation frequency (steps)
             n_eval_episodes: Episodes per evaluation
         """
-        callback = None
+        callbacks = []
         
         if callback_type == "callback" and save_dir:
-            callback = EvalCallback(
+            callbacks.append(EvalCallback(
                 eval_env=self.env,
                 n_eval_episodes=n_eval_episodes,
                 eval_freq=eval_freq,
@@ -271,7 +278,12 @@ class DDPGAgent(BaseDRLAgent):
                 best_model_save_path=str(save_dir),
                 deterministic=True,
                 render=False,
-            )
+            ))
+            
+        if custom_callbacks:
+            callbacks.extend(custom_callbacks)
+            
+        callback = callbacks if callbacks else None
         
         logger.info(f"Training DDPG for {total_timesteps} steps")
         self.model.learn(
@@ -387,6 +399,7 @@ class A2CAgent(BaseDRLAgent):
         save_dir: Optional[Path] = None,
         eval_freq: int = 10_000,
         n_eval_episodes: int = 5,
+        custom_callbacks: Optional[list] = None,
     ) -> None:
         """
         Train A2C agent.
@@ -398,10 +411,10 @@ class A2CAgent(BaseDRLAgent):
             eval_freq: Evaluation frequency (steps)
             n_eval_episodes: Episodes per evaluation
         """
-        callback = None
+        callbacks = []
         
         if callback_type == "callback" and save_dir:
-            callback = EvalCallback(
+            callbacks.append(EvalCallback(
                 eval_env=self.env,
                 n_eval_episodes=n_eval_episodes,
                 eval_freq=eval_freq,
@@ -409,7 +422,12 @@ class A2CAgent(BaseDRLAgent):
                 best_model_save_path=str(save_dir),
                 deterministic=True,
                 render=False,
-            )
+            ))
+
+        if custom_callbacks:
+            callbacks.extend(custom_callbacks)
+            
+        callback = callbacks if callbacks else None
         
         logger.info(f"Training A2C for {total_timesteps} steps")
         self.model.learn(

@@ -733,9 +733,14 @@ def rolling_window_ensemble(
         a2c.model.set_logger(a2c_logger)
 
         logger.info(f"Training agents for {total_steps} timesteps...")
-        ppo.train(total_timesteps=total_steps)
-        ddpg.train(total_timesteps=total_steps)
-        a2c.train(total_timesteps=total_steps)
+        
+        # Instantiate Curriculum Callback
+        from src.agents.curriculum import CurriculumCallback
+        curriculum_cb = CurriculumCallback(total_timesteps=total_steps)
+        
+        ppo.train(total_timesteps=total_steps, custom_callbacks=[curriculum_cb])
+        ddpg.train(total_timesteps=total_steps, custom_callbacks=[curriculum_cb])
+        a2c.train(total_timesteps=total_steps, custom_callbacks=[curriculum_cb])
         
         # Evaluate
         logger.info("Evaluating...")
@@ -1014,6 +1019,10 @@ def optuna_pipeline(
     
     # Initialize optimizer
     logger.info(f"\nInitializing Optuna optimizer for {agent_type}...")
+    
+    # Instantiate Curriculum Callback for final model training
+    from src.agents.curriculum import CurriculumCallback
+    curriculum_cb = CurriculumCallback(total_timesteps=50_000)
     optimizer = HyperparameterOptimizer(
         agent_type=agent_type,
         env_fn=lambda: train_env,
@@ -1049,7 +1058,7 @@ def optuna_pipeline(
         else:  # A2C
             agent = A2CAgent(env=train_env, **best_params)
         
-        agent.train(total_timesteps=50_000)
+        agent.train(total_timesteps=50_000, custom_callbacks=[curriculum_cb])
         
         # Evaluate on test set
         logger.info("Evaluating final model...")
