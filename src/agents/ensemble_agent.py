@@ -321,28 +321,15 @@ class EnsembleAgent(BaseDRLAgent):
     def evaluate(self, n_episodes: int, env=None):
         """
         Evaluate ensemble on multiple episodes.
-        
-        Parameters
-        ----------
-        n_episodes : int
-            Number of episodes to run
-        env : gym.Env, optional
-            Environment to evaluate on (default: self.env)
-        
-        Returns
-        -------
-        dict
-            Metrics: mean_reward, std_reward, min_reward, max_reward
-        
-        Example
-        -------
-        >>> metrics = ensemble.evaluate(n_episodes=10, env=test_env)
-        >>> print(f"Sharpe: {metrics['mean_reward']:.4f}")
         """
+        import pandas as pd
         if env is None:
             env = self.env
         
         episode_rewards = []
+        episode_sharpes = []
+        episode_drawdowns = []
+        episode_win_rates = []
         
         logger.info(f"Evaluating ensemble on {n_episodes} episodes...")
         
@@ -362,21 +349,43 @@ class EnsembleAgent(BaseDRLAgent):
             
             episode_rewards.append(episode_reward)
             logger.debug(f"Episode {episode}: reward={episode_reward:.4f}, steps={step}")
+            
+            # Extract financial metrics if available
+            if hasattr(env, 'asset_memory') and len(env.asset_memory) > 1:
+                portfolio_values = pd.Series(env.asset_memory)
+                daily_returns = portfolio_values.pct_change().dropna()
+                if len(daily_returns) > 1:
+                    vol = daily_returns.std()
+                    sharpe = (daily_returns.mean() / vol) * np.sqrt(252) if vol > 1e-9 else 0.0
+                    cumulative = (1 + daily_returns).cumprod()
+                    peak = cumulative.cummax()
+                    drawdown = float(((cumulative - peak) / peak).min())
+                    win_rate = float((daily_returns > 0).sum() / len(daily_returns))
+                    
+                    episode_sharpes.append(sharpe)
+                    episode_drawdowns.append(drawdown)
+                    episode_win_rates.append(win_rate)
         
         # Compute metrics
         metrics = {
-            'mean_reward': np.mean(episode_rewards),
-            'std_reward': np.std(episode_rewards),
-            'min_reward': np.min(episode_rewards),
-            'max_reward': np.max(episode_rewards),
-            'median_reward': np.median(episode_rewards),
+            'mean_reward': float(np.mean(episode_rewards)),
+            'std_reward': float(np.std(episode_rewards)),
+            'min_reward': float(np.min(episode_rewards)),
+            'max_reward': float(np.max(episode_rewards)),
+            'median_reward': float(np.median(episode_rewards)),
             'n_episodes': n_episodes,
         }
         
+        # Add financial metrics to output
+        if episode_sharpes:
+            metrics['sharpe_ratio'] = float(np.mean(episode_sharpes))
+            metrics['max_drawdown'] = float(np.mean(episode_drawdowns))
+            metrics['win_rate'] = float(np.mean(episode_win_rates))
+        
         logger.info(f"Evaluation complete:")
         logger.info(f"  Mean reward: {metrics['mean_reward']:.4f}")
-        logger.info(f"  Std reward: {metrics['std_reward']:.4f}")
-        logger.info(f"  Min/Max: {metrics['min_reward']:.4f} / {metrics['max_reward']:.4f}")
+        logger.info(f"  Sharpe: {metrics.get('sharpe_ratio', 0.0):.4f}")
+        logger.info(f"  WinRate: {metrics.get('win_rate', 0.0):.2%}")
         
         return metrics
     

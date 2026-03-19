@@ -54,8 +54,8 @@ from src.data import DataLoader, DataProcessor
 loader = DataLoader(data_path="data/raw")
 df = loader.load_multiple_assets(
     assets=["PETR4", "VALE3"],
-    start_date="2022-01-01",
-    end_date="2023-12-31",
+    start_date="2023-01-01",
+    end_date="2024-12-31",
 )
 
 # Preprocess
@@ -303,8 +303,8 @@ from src.data import DataLoader, DataProcessor
 loader = DataLoader()
 df = loader.load_multiple_assets(
     assets=["PETR4", "VALE3", "BBAS3"],
-    start_date="2021-01-01",
-    end_date="2024-12-31",
+    start_date="2023-01-01",
+    end_date="2025-12-31",
 )
 
 processor = DataProcessor()

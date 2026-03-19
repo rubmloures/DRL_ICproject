@@ -23,6 +23,8 @@ import logging
 import sys
 from datetime import datetime
 import argparse
+import json
+import glob
 
 # Optional torch for PINN support
 try:
@@ -40,6 +42,7 @@ from config.config import (
     PRIMARY_ASSETS, INITIAL_CAPITAL, TRANSACTION_COST, SLIPPAGE,
     ROLLING_WINDOW_CONFIG, ENSEMBLE_CONFIG,
     PINN_ENABLED, PINN_CHECKPOINT_PATH, PINN_DATA_STATS_PATH,
+    TRAIN_START, VAL_END
 )
 from config.hyperparameters import (
     PPO_PARAMS, DDPG_PARAMS, A2C_PARAMS,
@@ -56,6 +59,7 @@ from src.agents import PPOAgent, DDPGAgent, A2CAgent, EnsembleAgent
 from src.optimization.hyperparameter_optimizer import HyperparameterOptimizer
 from src.evaluation.results_manager import ResultsManager
 from src.evaluation.visualization import TradingVisualizer
+from src.agents.unified_callbacks import UnifiedRichDashboard, StepAuditCallback, TrainingLossAuditCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 
@@ -92,7 +96,50 @@ def setup_directories() -> None:
     """Create necessary output directories."""
     for directory in [DATA_PROCESSED, TRAINED_MODELS, RESULTS]:
         directory.mkdir(parents=True, exist_ok=True)
-        logger.info(f" {directory}")
+        logger.info(f" Prepared directory: {directory}")
+
+def load_optimized_hyperparameters(agent_type: str, current_params: Dict) -> Dict:
+    """
+    Search for the latest Optuna optimization results and update parameters.
+    
+    Args:
+        agent_type: 'PPO', 'DDPG', or 'A2C'
+        current_params: Default parameters to be updated
+    
+    Returns:
+        Updated parameters dictionary
+    """
+    results_mgr = ResultsManager(RESULTS)
+    # Search for optuna_{agent_type}_optimization files
+    pattern = f"optuna_{agent_type}_optimization"
+    metrics_files = sorted(list(results_mgr.metrics_dir.glob(f"{pattern}*.json")), reverse=True)
+    
+    if not metrics_files:
+        logger.info(f" No optimized hyperparameters found for {agent_type}. Using defaults.")
+        return current_params
+    
+    latest_file = metrics_files[0]
+    logger.info(f" Loading optimized hyperparameters for {agent_type} from {latest_file.name}")
+    
+    try:
+        with open(latest_file, 'r') as f:
+            opt_data = json.load(f)
+            best_params = opt_data.get('best_params', {})
+            
+            # Map Optuna keys to Agent keys if necessary
+            mapping = {'lr': 'learning_rate'}
+            for opt_key, val in best_params.items():
+                agent_key = mapping.get(opt_key, opt_key)
+                # Handle nested dicts (policy_kwargs)
+                if isinstance(val, dict) and agent_key in current_params:
+                    current_params[agent_key].update(val)
+                else:
+                    current_params[agent_key] = val
+                    
+        return current_params
+    except Exception as e:
+        logger.warning(f" Failed to load optimized parameters: {e}. Using defaults.")
+        return current_params
 
 
 def load_raw_options_data(assets: List[str] = None) -> Dict[str, pd.DataFrame]:
@@ -228,18 +275,19 @@ def prepare_drl_dataset(options_data: Dict[str, pd.DataFrame], processor: DataPr
         for date, group in df.groupby('date'):
             daily_record = {'date': date}
             
-            # Spot price (OHLCV)
-            if 'spot_price' in group.columns:
+            # Spot price (OHLCV) from true stock values if available
+            if 'acao_open' in group.columns and 'acao_close_ajustado' in group.columns:
+                daily_record['open'] = group['acao_open'].iloc[0]
+                daily_record['high'] = group['acao_high'].iloc[0]
+                daily_record['low'] = group['acao_low'].iloc[0]
+                daily_record['close'] = group['acao_close_ajustado'].iloc[0]
+                daily_record['volume'] = group['acao_vol_fin'].iloc[0] if 'acao_vol_fin' in group.columns else len(group)
+            elif 'spot_price' in group.columns:
                 daily_record['open'] = group['spot_price'].iloc[0] if len(group) > 0 else np.nan
                 daily_record['high'] = group['spot_price'].max()
                 daily_record['low'] = group['spot_price'].min()
                 daily_record['close'] = group['spot_price'].iloc[-1] if len(group) > 0 else np.nan
-            
-            # Volume
-            if 'acao_vol_fin' in group.columns:
-                daily_record['volume'] = group['acao_vol_fin'].sum()
-            else:
-                daily_record['volume'] = len(group)  # Fallback: number of options
+                daily_record['volume'] = len(group)
             
             # Greeks (mean and std)
             for greek in ['delta', 'gamma', 'theta', 'vega', 'rho']:
@@ -275,6 +323,11 @@ def prepare_drl_dataset(options_data: Dict[str, pd.DataFrame], processor: DataPr
     
     logger.info(f"\n✓ DRL Dataset ready: {len(combined_drl)} trading days")
     logger.info(f"  Columns: {len(combined_drl.columns)}")
+    
+    # Audit export
+    audit_path = RESULTS / "DRL_observation_dataset_audit.csv"
+    combined_drl.to_csv(audit_path, index=False)
+    logger.info(f"  Dataset exported for audit: {audit_path}")
     
     return combined_drl, options_data
 
@@ -627,16 +680,64 @@ def simple_pipeline(df: pd.DataFrame, assets: Optional[List[str]] = None) -> Dic
     fig_metrics = visualizer.plot_metrics_comparison(metrics_dict)
     results_mgr.save_plot(fig_metrics, 'metrics_comparison')
     
+    # ==========================================
+    # 4. NOVOS PLOTS: Análise de Sinais Intermediários
+    # (Heston vs Preço, Volatilidade vs Preço)
+    # ==========================================
+    try:
+        import matplotlib.pyplot as plt
+        
+        # Obter o preço do primeiro ativo (ex: PETR4) para sobrepor
+        # O histórico real foi de len(account_memory)-1 dias
+        n_days = len(account_memory) - 1
+        asset_prices = [test_env.df.iloc[day][f'stock_0_close'] for day in range(n_days)]
+        
+        if hasattr(test_env, 'heston_memory') and len(test_env.heston_memory) > 0:
+            # Plota Heston Nu vs Preço Real
+            nu_series = [h.get('nu', 0) for h in test_env.heston_memory]
+            xi_series = [h.get('xi', 0) for h in test_env.heston_memory]
+            
+            fig, ax1 = plt.subplots(figsize=(10, 5))
+            ax1.plot(asset_prices, color='blue', label='Preço (PETR4)')
+            ax1.set_ylabel('Preço BRL', color='blue')
+            ax2 = ax1.twinx()
+            ax2.plot(nu_series, color='red', alpha=0.5, label='Heston Nu (Mean Vol)')
+            ax2.plot(xi_series, color='green', alpha=0.5, label='Heston Xi (Vol of Vol)')
+            ax2.set_ylabel('Heston Params', color='black')
+            fig.suptitle('Heston Parameters vs Real Price (Regime Detection Audit)')
+            fig.legend(loc='upper right')
+            results_mgr.save_plot(fig, 'heston_vs_price_audit')
+            plt.close(fig)
+        
+        if hasattr(test_env, 'volatility_memory') and len(test_env.volatility_memory) > 0:
+            # Plota Realized Volatility vs Preço Real
+            fig, ax1 = plt.subplots(figsize=(10, 5))
+            ax1.plot(asset_prices, color='blue', label='Preço (PETR4)')
+            ax1.set_ylabel('Preço BRL', color='blue')
+            ax2 = ax1.twinx()
+            ax2.plot(test_env.volatility_memory, color='purple', alpha=0.6, label='Current Volatility')
+            ax2.set_ylabel('Volatility', color='purple')
+            fig.suptitle('Market Volatility vs Real Price')
+            fig.legend(loc='upper right')
+            results_mgr.save_plot(fig, 'volatility_vs_price_audit')
+            plt.close(fig)
+            
+    except Exception as e:
+        logger.error(f"Erro ao gerar plots intermediários de auditoria: {e}")
+
     logger.info(" Gráficos gerados e salvos em results/plots/")
     return complete_results
 
 
 def rolling_window_ensemble(
     df: pd.DataFrame,
+    assets: Optional[List[str]] = None,
     pinn_engine: Optional[Any] = None,
     pinn_features_enabled: bool = False,
     ab_testing_enabled: bool = False,
-    results_prefix: str = ""
+    results_prefix: str = "",
+    minimal_plots: bool = False,
+    monitor_queue: Optional[Any] = None
 ) -> Dict:
     """
     Production pipeline with rolling window cross-validation.
@@ -647,6 +748,9 @@ def rolling_window_ensemble(
     ----------
     df : pd.DataFrame
         Processed data with technical indicators
+    assets : list, optional
+        List of asset tickers to trade. If None, uses PRIMARY_ASSETS from config.
+        Controls stock_dim — MUST match the number of stocks loaded in df.
     pinn_engine : PINNInferenceEngine, optional
         PINN inference engine for Heston parameter extraction
     pinn_features_enabled : bool
@@ -654,6 +758,11 @@ def rolling_window_ensemble(
     ab_testing_enabled : bool
         Whether to run A/B testing (with/without PINN)
     """
+    # Resolve actual assets to use — default to config but respect caller's override
+    if assets is None:
+        assets = PRIMARY_ASSETS
+    stock_dim = len(assets)
+
     logger.info("\n" + "="*70)
     logger.info("ROLLING WINDOW ENSEMBLE STRATEGY (Production)") 
     if pinn_features_enabled:
@@ -662,6 +771,24 @@ def rolling_window_ensemble(
         logger.info("+ A/B Testing: ENABLED")
     logger.info("="*70)
     
+    logger.info(f"Applying Temporal Filter: {TRAIN_START} to {VAL_END}")
+    logger.info(f"  Trading {stock_dim} asset(s): {assets}")
+    mask = (df['date'] >= pd.to_datetime(TRAIN_START)) & (df['date'] <= pd.to_datetime(VAL_END))
+    original_len = len(df)
+    df = df[mask].copy().sort_values('date').reset_index(drop=True)
+    # CRITICAL: Sync the 'data' column used by RollingWindowStrategy after date-based filter
+    # RollingWindowStrategy reads dates from 'data' column for reporting.
+    # If 'data' column is stale (e.g. from before filter), windows will show wrong dates.
+    df['data'] = df['date']
+    df['time'] = df['date']
+    logger.info(f" Data filtered: {original_len} -> {len(df)} rows | Date range: "
+               f"{df['date'].iloc[0].date() if len(df) > 0 else 'N/A'} to "
+               f"{df['date'].iloc[-1].date() if len(df) > 0 else 'N/A'}")
+    
+    if len(df) == 0:
+        logger.error("No data remaining after temporal filter! Check config dates vs data dates.")
+        return {}
+
     # Create rolling window strategy
     rolling = RollingWindowStrategy(
         df=df,
@@ -674,6 +801,19 @@ def rolling_window_ensemble(
     
     window_results = []
     
+    # Initialize agents outside the loop for Warm-start
+    ppo = None
+    ddpg = None
+    a2c = None
+    
+    first_train_env = None # Capture for final audit visualization
+
+    # Load optimized parameters once if not already done
+    global PPO_PARAMS, DDPG_PARAMS, A2C_PARAMS
+    PPO_PARAMS = load_optimized_hyperparameters('PPO', PPO_PARAMS)
+    DDPG_PARAMS = load_optimized_hyperparameters('DDPG', DDPG_PARAMS)
+    A2C_PARAMS = load_optimized_hyperparameters('A2C', A2C_PARAMS)
+
     for train_df, test_df, window_idx, date_range in rolling.generate_rolling_windows():
         logger.info(f"\n{'='*70}")
         logger.info(f"Window {window_idx}: {date_range['train_start'].date()} "
@@ -684,10 +824,70 @@ def rolling_window_ensemble(
         log_dir = RESULTS / "logs" / f"window_{window_idx}"
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create environments
+        # --- STEP 1: Fit K-Means Regime Detector BEFORE creating environments ---
+        # K-Means uses PINN features from training data to learn dynamic regime boundaries.
+        # This must happen BEFORE train_env creation so the fitted detector can be passed.
+        # We only fit K-Means if PINN features are enabled by the user.
+        regime_detector_fitted = False
+        if pinn_features_enabled:
+            dummy_env_for_detector = StockTradingEnv(
+                df=train_df,
+                stock_dim=stock_dim,
+                initial_amount=INITIAL_CAPITAL,
+                buy_cost_pct=TRANSACTION_COST,
+                sell_cost_pct=TRANSACTION_COST,
+            )
+            
+            pinn_cols_canonical = ['pinn_nu', 'pinn_xi', 'pinn_rho']
+            base_pinn_df = pd.DataFrame()
+            
+            # Priority 1: non-prefixed columns (set as alias for asset 0 in enrich_with_pinn_features)
+            if all(col in train_df.columns for col in pinn_cols_canonical):
+                base_pinn_df = train_df[pinn_cols_canonical].rename(
+                    columns={'pinn_nu': 'nu', 'pinn_xi': 'xi', 'pinn_rho': 'rho'}
+                )
+            else:
+                # Priority 2: prefixed columns for stock_0 (first asset as proxy)
+                prefixed_pinn_cols = [f'stock_0_pinn_nu', f'stock_0_pinn_xi', f'stock_0_pinn_rho']
+                if all(col in train_df.columns for col in prefixed_pinn_cols):
+                    base_pinn_df = train_df[prefixed_pinn_cols].rename(
+                        columns={'stock_0_pinn_nu': 'nu', 'stock_0_pinn_xi': 'xi', 'stock_0_pinn_rho': 'rho'}
+                    )
+            
+            if not base_pinn_df.empty:
+                # Drop NaNs before fitting
+                clean_df = base_pinn_df.dropna()
+                
+                # SAFETY CHECK: K-Means fails silently when all data is constant/identical
+                # (e.g. all zeros when PINN enrichment failed). Check variance before fitting.
+                col_variances = clean_df.var()
+                has_variance = (col_variances > 1e-10).any()
+                
+                if not has_variance:
+                    logger.warning(
+                        f" Window {window_idx}: PINN columns are constant/zero (PINN enrichment failed?). "
+                        f"Skipping K-Means — regime detector will use static thresholds as fallback."
+                    )
+                elif len(clean_df) < 4:  # Minimum 4 samples for 4 clusters
+                    logger.warning(f" Not enough clean PINN samples for K-Means ({len(clean_df)} < 4)")
+                else:
+                    logger.info(f" Fitting K-Means Regime Detector for Window {window_idx} ({len(clean_df)} samples)...")
+                    dummy_env_for_detector.regime_detector.fit_kmeans(clean_df.astype(np.float64))
+                    if dummy_env_for_detector.regime_detector.kmeans is not None and \
+                       not np.isnan(dummy_env_for_detector.regime_detector.kmeans.cluster_centers_).any():
+                        logger.info(f" ✅ K-Means fitted successfully. "
+                                   f"Clusters: {dummy_env_for_detector.regime_detector.kmeans.cluster_centers_.shape[0]}")
+                        regime_detector_fitted = True
+                    else:
+                        logger.error("🚨 K-Means fitting failed: Centroids contain NaNs!")
+            else:
+                logger.warning(f" Window {window_idx}: No PINN columns found in train_df. "
+                              f"K-Means will use static thresholds. Run with --pinn-features to enable.")
+
+        # --- STEP 2: Create environments with the pre-fitted regime detector ---
         train_env = StockTradingEnv(
             df=train_df,
-            stock_dim=len(PRIMARY_ASSETS),
+            stock_dim=stock_dim,
             initial_amount=INITIAL_CAPITAL,
             buy_cost_pct=TRANSACTION_COST,
             sell_cost_pct=TRANSACTION_COST,
@@ -696,9 +896,18 @@ def rolling_window_ensemble(
             print_verbosity=1000
         )
         
+        # Save first train_env for the training sample plot at the end
+        if first_train_env is None:
+            first_train_env = train_env
+        
+        # Transfer the pre-fitted K-Means detector to the actual training environment
+        if regime_detector_fitted:
+            train_env.regime_detector = dummy_env_for_detector.regime_detector
+            logger.info(f" ✅ Pre-fitted K-Means Regime Detector transferred to train_env")
+
         test_env = StockTradingEnv(
             df=test_df,
-            stock_dim=len(PRIMARY_ASSETS),
+            stock_dim=stock_dim,
             initial_amount=INITIAL_CAPITAL,
             buy_cost_pct=TRANSACTION_COST,
             sell_cost_pct=TRANSACTION_COST,
@@ -706,41 +915,61 @@ def rolling_window_ensemble(
             include_pinn_features=pinn_features_enabled,
         )
         
-        # Train agents
-        logger.info("Training agents...")
-        ppo = PPOAgent(env=train_env,
-                       tensorboard_log=str(TENSORBOARD_LOG_DIR), 
-                       **PPO_PARAMS)
-        ddpg = DDPGAgent(env=train_env,
-                         tensorboard_log=str(TENSORBOARD_LOG_DIR), 
-                         **DDPG_PARAMS)
-        a2c = A2CAgent(env=train_env,
-                       tensorboard_log=str(TENSORBOARD_LOG_DIR), 
-                       **A2C_PARAMS)
-        
-        total_steps = TRAINING_CONFIG.get("total_timesteps", 100_000)
+        # Critical Fix: Transfer fitted Regime Detector from Train to Test env
+        # This ensures the Test environment uses the SAME regime boundaries learned during Training.
+        # Note: Transfer whenever K-Means was successfully fitted, regardless of pinn_features_enabled.
+        if regime_detector_fitted and hasattr(train_env, 'regime_detector'):
+            test_env.regime_detector = train_env.regime_detector
+            logger.info(f" 🔄 Transferred fitted K-Means Detector to Test Environment (Shared Knowledge)")
+
+        # Steps configuration: full for first window, reduced for subsequent (Warm-start)
+        base_steps = TRAINING_CONFIG.get("total_timesteps", 100_000)
+        total_steps = base_steps if window_idx == 0 else int(base_steps * 0.3) # 30% for adaptation
+
+        # Train/Update agents
+        if window_idx == 0:
+            logger.info("Initializing agents for first window...")
+            ppo = PPOAgent(env=train_env, tensorboard_log=str(TENSORBOARD_LOG_DIR), **PPO_PARAMS)
+            ddpg = DDPGAgent(env=train_env, tensorboard_log=str(TENSORBOARD_LOG_DIR), **DDPG_PARAMS)
+            a2c = A2CAgent(env=train_env, tensorboard_log=str(TENSORBOARD_LOG_DIR), **A2C_PARAMS)
+        else:
+            logger.info(f"Warm-start: Updating agents environments for window {window_idx}...")
+            ppo.model.set_env(train_env)
+            ddpg.model.set_env(train_env)
+            a2c.model.set_env(train_env)
 
         logger.info("Configurando SB3 Loggers (CSV/Tensorboard)...")
         sb3_log_dir = log_dir / "sb3_logs"
         
-        ppo_logger = configure(str(sb3_log_dir / "ppo"), ["stdout", "csv", "tensorboard"])
+        ppo_logger = configure(str(sb3_log_dir / "ppo"), ["csv", "tensorboard"])
         ppo.model.set_logger(ppo_logger)
         
-        ddpg_logger = configure(str(sb3_log_dir / "ddpg"), ["stdout", "csv", "tensorboard"])
+        ddpg_logger = configure(str(sb3_log_dir / "ddpg"), ["csv", "tensorboard"])
         ddpg.model.set_logger(ddpg_logger)
         
-        a2c_logger = configure(str(sb3_log_dir / "a2c"), ["stdout", "csv", "tensorboard"])
+        a2c_logger = configure(str(sb3_log_dir / "a2c"), ["csv", "tensorboard"])
         a2c.model.set_logger(a2c_logger)
 
-        logger.info(f"Training agents for {total_steps} timesteps...")
+        logger.info(f"Training agents for {total_steps} timesteps (Adaptation)...")
         
         # Instantiate Curriculum Callback
         from src.agents.curriculum import CurriculumCallback
         curriculum_cb = CurriculumCallback(total_timesteps=total_steps)
         
-        ppo.train(total_timesteps=total_steps, custom_callbacks=[curriculum_cb])
-        ddpg.train(total_timesteps=total_steps, custom_callbacks=[curriculum_cb])
-        a2c.train(total_timesteps=total_steps, custom_callbacks=[curriculum_cb])
+        # --- NEW: Unified Dashboards and Audits ---
+        # Normalize name for parallel dashboard matching (uppercase, no parallel_ prefix)
+        label = results_prefix.upper().replace("PARALLEL_", "").replace("_", "") if "parallel" in results_prefix.lower() else (results_prefix if results_prefix else "Ensemble")
+        
+        ppo_dash = UnifiedRichDashboard(name=label, total_timesteps=total_steps, window_idx=window_idx, queue=monitor_queue)
+        ddpg_dash = UnifiedRichDashboard(name=label, total_timesteps=total_steps, window_idx=window_idx, queue=monitor_queue)
+        a2c_dash = UnifiedRichDashboard(name=label, total_timesteps=total_steps, window_idx=window_idx, queue=monitor_queue)
+        
+        audit_cb = StepAuditCallback(filename=f"audit_ensemble_w{window_idx}.csv")
+        loss_audit_cb = TrainingLossAuditCallback(filename=f"loss_audit_ensemble_w{window_idx}.csv")
+        
+        ppo.train(total_timesteps=total_steps, custom_callbacks=[curriculum_cb, ppo_dash, audit_cb, loss_audit_cb], verbose=0)
+        ddpg.train(total_timesteps=total_steps, custom_callbacks=[curriculum_cb, ddpg_dash, audit_cb, loss_audit_cb], verbose=0)
+        a2c.train(total_timesteps=total_steps, custom_callbacks=[curriculum_cb, a2c_dash, audit_cb, loss_audit_cb], verbose=0)
         
         # Evaluate
         logger.info("Evaluating...")
@@ -778,28 +1007,40 @@ def rolling_window_ensemble(
         # Run one deterministic episode to get daily portfolio values
         obs, _ = test_env.reset()
         done = False
+
+        # Executar episódio completo
         while not done:
             action, _ = ensemble.predict(obs, deterministic=True)
             obs, _, terminated, truncated, _ = test_env.step(action)
             done = terminated or truncated
-            
-        # Extract portfolio history
-        portfolio_values = pd.Series(test_env.asset_memory)
+
+        # Extrair históricos do ambiente
+        account_memory = getattr(test_env, 'asset_memory', [INITIAL_CAPITAL])
+        dates = test_env.df['date'].values[:len(account_memory)].tolist() if hasattr(test_env, 'df') and 'date' in test_env.df.columns else list(range(len(account_memory)))
+
+        # Calcular benchmark (preço do primeiro ativo)
+        if hasattr(test_env, 'df') and f'stock_0_close' in test_env.df.columns:
+            benchmark_prices = test_env.df[f'stock_0_close'].values[:len(account_memory)].tolist()
+        else:
+            # Fallback: usar o próprio portfólio ou valores constantes
+            benchmark_prices = [INITIAL_CAPITAL] * len(account_memory)
+
+        # Calcular retornos diários
+        portfolio_values = pd.Series(account_memory)
         daily_returns = portfolio_values.pct_change().dropna()
-        
-        # Calculate Metrics
+
+        # Calcular Métricas
         if len(daily_returns) > 1:
-            # Sharpe (Annualized) - assuming 252 days
-            # If window is short, this is an approximation
+            # Sharpe (Annualized) - assumindo 252 dias
             sharpe = (daily_returns.mean() / daily_returns.std()) * np.sqrt(252) if daily_returns.std() > 1e-9 else 0.0
-            
+
             # Cumulative Return
             total_return = (portfolio_values.iloc[-1] / portfolio_values.iloc[0]) - 1.0
-            
+
             # Annualized Return
             days = len(portfolio_values)
             annual_return = ((1 + total_return) ** (252 / days)) - 1.0 if days > 0 else 0.0
-            
+
             # Max Drawdown
             cumulative = (1 + daily_returns).cumprod()
             peak = cumulative.cummax()
@@ -810,23 +1051,28 @@ def rolling_window_ensemble(
             total_return = 0.0
             annual_return = 0.0
             max_drawdown = 0.0
-            
+
         # Store results
         result = {
             'window_idx': window_idx,
             'ppo_reward': ppo_metrics['mean_reward'],
             'ddpg_reward': ddpg_metrics['mean_reward'],
             'a2c_reward': a2c_metrics['mean_reward'],
-            'ensemble_reward': ensemble_metrics['mean_reward'], # Still keep reward
-            
+            'ensemble_reward': ensemble_metrics['mean_reward'],
+
             # Calculated Metrics
             'ensemble_sharpe': sharpe,
             'ensemble_total_return': total_return,
             'ensemble_annual_return': annual_return,
             'ensemble_max_drawdown': max_drawdown,
-            
+
             'start_date': date_range['test_start'].date(),
             'end_date': date_range['test_end'].date(),
+
+            # Full history for global plotting
+            'portfolio_history': list(account_memory),
+            'benchmark_history': list(benchmark_prices),
+            'dates_history': [str(d) for d in dates[:len(account_memory)]]
         }
         window_results.append(result)
         
@@ -849,9 +1095,7 @@ def rolling_window_ensemble(
         except Exception as e:
             logger.error(f"Failed to save models for window {window_idx}: {e}")
         
-        # Limit to 3 windows REMOVED for production
-        # if window_idx >= 2: ...
-    
+       
     # Aggregate results
     logger.info("\n" + "="*70)
     logger.info("Aggregated Results Across All Windows")
@@ -893,71 +1137,162 @@ def rolling_window_ensemble(
     
     # Save as CSV for easier analysis
     df_results = pd.DataFrame(window_results)
-    results_mgr.save_metrics_dataframe(df_results, f'{results_prefix}rolling_ensemble_windows')
+    # Drop large history lists before saving CSV
+    df_csv = df_results.drop(columns=['portfolio_history', 'benchmark_history', 'dates_history'], errors='ignore')
+    results_mgr.save_metrics_dataframe(df_csv, f'{results_prefix}rolling_ensemble_windows')
     
     logger.info(" Rolling window results saved to results/")
     
-    # Visualização
-    logger.info("\nGerando visualizações...")
+    # Visualização Global
+    logger.info("\nGerando visualizações globais (Toda a Validação)...")
     
-    # 1. Executar um episódio completo no ambiente de teste para gerar o histórico
-    obs, _ = test_env.reset()
-    done = False
-    while not done:
-        # Usa o ensemble para decidir (modo determinístico para gráfico limpo)
-        action, _ = ensemble.predict(obs, deterministic=True)
-        obs, _, terminated, truncated, _ = test_env.step(action)
-        done = terminated or truncated
-    # 2. Criar DataFrame com o histórico de 'account_value'
-    # O asset_memory tem o valor inicial + valor a cada dia. Ajustamos o tamanho.
-    account_memory = test_env.asset_memory
-    dates = test_env.df['date'].values if 'date' in test_env.df.columns else test_env.df.index
-    benchmark_col = 'stock_0_close' if 'stock_0_close' in test_env.df.columns else test_env.df.columns[0]
-    benchmark_prices = test_env.df[benchmark_col].values[:len(account_memory)]
+    # Reconstruct full validation curve from individual windows
+    full_portfolio = [INITIAL_CAPITAL]
+    full_benchmark = [1.0]
+    full_dates = []
+    
+    # Initial date for benchmark logic
+    if window_results:
+        first_bench_price = window_results[0]['benchmark_history'][0]
+    
+    for res in window_results:
+        # Avoid including initial step value repeatedly if possible
+        window_port = res['portfolio_history'][1:]
+        window_bench = res['benchmark_history'][1:]
+        window_dates = res['dates_history'][1:]
+        
+        # Adjust portfolio value to be continuous (chaining)
+        last_val = full_portfolio[-1]
+        returns = np.array(window_port) / res['portfolio_history'][0]
+        full_portfolio.extend((returns * last_val).tolist())
+        
+        # Benchmark concatenated (normalized to start at 1.0)
+        full_benchmark.extend((np.array(window_bench) / first_bench_price).tolist())
+        full_dates.extend(window_dates)
 
-    # Garantir que os tamanhos batem (pode haver deslocamento de 1 dia pelo valor inicial)
-    if len(account_memory) > len(dates):
-        account_memory = account_memory[:len(dates)]
+    # Ensure sizes match
+    min_len = min(len(full_portfolio), len(full_benchmark), len(full_dates))
+    full_portfolio = full_portfolio[:min_len]
+    full_benchmark = full_benchmark[:min_len]
+    full_dates = full_dates[:min_len]
     
     df_visualizacao = pd.DataFrame({
-        'date': dates[:len(account_memory)],
-        'account_value': account_memory
+        'date': full_dates,
+        'account_value': full_portfolio
     })
-    # 3. Gerar e Salvar os Gráficos
+    
     visualizer = TradingVisualizer()
-    # Gráfico de Valor do Portfólio
-    fig_portfolio = visualizer.plot_portfolio_value(df_visualizacao, title="Evolução do Patrimônio - Teste")
-    results_mgr.save_plot(fig_portfolio, 'equity_curve')
-    # Gráfico de Drawdown (Picos de queda)
-    returns = df_visualizacao['account_value'].pct_change().dropna()
-    fig_drawdown = visualizer.plot_drawdown(returns)
-    results_mgr.save_plot(fig_drawdown, 'drawdown_underwater')
-    # Comparativo de Métricas (Barras)
-    metrics_dict = {
-        'PPO': ppo_metrics, 
-        'DDPG': ddpg_metrics, 
-        'A2C': a2c_metrics, 
-        'Ensemble': ensemble_metrics
-    }
-    fig_metrics = visualizer.plot_metrics_comparison(metrics_dict)
-    results_mgr.save_plot(fig_metrics, 'metrics_comparison')
-    # 
-    try:
-        # Gráfico Estratégia vs Benchmark
-        fig_bench = visualizer.plot_strategy_vs_benchmark(account_memory, benchmark_prices, dates)
-        results_mgr.save_plot(fig_bench, f'{results_prefix}strategy_vs_benchmark')
+    results_mgr = ResultsManager(RESULTS)
+
+    if minimal_plots:
+        logger.info("  [Minimal Plots Mode] Generating only Strategy vs Benchmark comparison.")
+        try:
+            # Em modo minimalista, preservamos apenas o comparativo real DRL vs Benchmark
+            strategy_name = "DRL Ensemble (Baseline)"
+            fig_bench = visualizer.plot_strategy_vs_benchmark(
+                full_portfolio, 
+                (np.array(full_benchmark) * INITIAL_CAPITAL).tolist(), 
+                full_dates
+            )
+            # Customizar legenda para não mostrar "+ PINN" se for baseline
+            fig_bench.data[0].name = strategy_name
+            results_mgr.save_plot(fig_bench, f'{results_prefix}strategy_vs_benchmark')
+        except Exception as e:
+            logger.warning(f"Erro ao gerar plot minimalista: {e}")
+    else:
+        # 3. Gerar e Salvar os Gráficos Globais (Validação Completa - Modo Full)
+        # Gráfico de Valor do Portfólio Global
+        fig_portfolio = visualizer.plot_portfolio_value(df_visualizacao, title="Evolução do Patrimônio - Validação Global")
+        results_mgr.save_plot(fig_portfolio, f'{results_prefix}equity_curve')
         
-        # Gráfico de Volatilidade Móvel
-        fig_vol = visualizer.plot_rolling_volatility(account_memory)
-        results_mgr.save_plot(fig_vol, f'{results_prefix}rolling_volatility')
+        # Gráfico de Drawdown Global
+        returns_global = df_visualizacao['account_value'].pct_change().dropna()
+        fig_drawdown = visualizer.plot_drawdown(returns_global)
+        results_mgr.save_plot(fig_drawdown, f'{results_prefix}drawdown_underwater')
         
-        # Opcional: Salvar plot de saúde do treino do PPO da última janela
-        last_ppo_log = RESULTS / "logs" / f"window_{window_idx}" / "sb3_logs" / "ppo"
-        if last_ppo_log.exists():
-            fig_health = visualizer.plot_sb3_training_metrics(str(last_ppo_log))
-            results_mgr.save_plot(fig_health, f'{results_prefix}training_health_ppo')
-    except Exception as e:
-        logger.warning(f"Erro ao gerar novos gráficos de validação: {e}")
+        # Comparativo de Métricas (Barras) usando as MÉDIAS de todas as janelas
+        aggregated = complete_results.get('aggregated', {})
+        
+        metrics_dict = {
+            'PPO': {
+                'mean_reward': aggregated.get('avg_ppo_reward', 0.0),
+            },
+            'DDPG': {
+                'mean_reward': aggregated.get('avg_ddpg_reward', 0.0),
+            },
+            'A2C': {
+                'mean_reward': aggregated.get('avg_a2c_reward', 0.0),
+            },
+            'Ensemble': {
+                'mean_reward': aggregated.get('avg_ensemble_reward', 0.0),
+                'sharpe_ratio': aggregated.get('avg_ensemble_sharpe', 0.0),
+                'annual_return': aggregated.get('avg_ensemble_annual_return', 0.0),
+                'max_drawdown': aggregated.get('avg_ensemble_max_drawdown', 0.0),
+            }
+        }
+        
+        fig_metrics = visualizer.plot_metrics_comparison(metrics_dict)
+        results_mgr.save_plot(fig_metrics, f'{results_prefix}metrics_comparison')
+        
+        # NOVOS GRÁFICOS (Eficácia de Regimes e Heston)
+        audit_files = glob.glob(str(RESULTS / "logs" / "audit" / "audit_ensemble_w*.csv"))
+        if audit_files:
+            combined_audit = pd.concat([pd.read_csv(f) for f in audit_files]).sort_values("step")
+            
+            # 1. Eficácia de Regimes (Global)
+            fig_regime_eff = visualizer.plot_regime_efficacy(combined_audit, title="Eficácia da Detecção de Regimes DRL/PINN - Global")
+            results_mgr.save_plot(fig_regime_eff, f'{results_prefix}regime_efficacy_global')
+            
+            # 2. Heston vs Resultados
+            fig_heston = visualizer.plot_heston_v_results(combined_audit, title="Parâmetros Heston (PINN) vs Performance do Agente")
+            results_mgr.save_plot(fig_heston, f'{results_prefix}heston_vs_returns')
+            
+            # 3. Dispersão de Clusters de Regime (NEW)
+            fig_clusters = visualizer.plot_regime_clusters(combined_audit, title="Clusters de Regime Detectados (Espaço Heston)")
+            results_mgr.save_plot(fig_clusters, f'{results_prefix}regime_clusters_pinn')
+            
+            # 4. Intensidade de Ação por Regime
+            fig_action_regime = visualizer.plot_regime_vs_actions(combined_audit, title="Intensidade de Ação (Agnóstia de Risco) por Regime")
+            results_mgr.save_plot(fig_action_regime, f'{results_prefix}action_intensity_regime')
+        
+        try:
+            # Gráfico Estratégia vs Benchmark Global
+            fig_bench = visualizer.plot_strategy_vs_benchmark(full_portfolio, (np.array(full_benchmark) * INITIAL_CAPITAL).tolist(), full_dates)
+            results_mgr.save_plot(fig_bench, f'{results_prefix}strategy_vs_benchmark')
+            
+            # Gráfico de Volatilidade Móvel Global
+            fig_vol = visualizer.plot_rolling_volatility(full_portfolio)
+            results_mgr.save_plot(fig_vol, f'{results_prefix}rolling_volatility')
+            
+            # Performance durante o Treinamento
+            if first_train_env is not None:
+                obs, _ = first_train_env.reset()
+                done = False
+                while not done:
+                    action, _ = ensemble.predict(obs, deterministic=True)
+                    obs, _, terminated, truncated, _ = first_train_env.step(action)
+                    done = terminated or truncated
+                    
+                train_dates = first_train_env.df['date'].values[:len(first_train_env.asset_memory)]
+                fig_train = visualizer.plot_portfolio_value(
+                    pd.DataFrame({
+                        'date': train_dates,
+                        'account_value': first_train_env.asset_memory
+                    }), 
+                    title=f"Performance em Dados de Treino (Sample Window 0)"
+                )
+                results_mgr.save_plot(fig_train, f'{results_prefix}training_performance_sample')
+
+            train_audit_file = RESULTS / "logs" / "audit" / "audit_ensemble_w0.csv"
+            if train_audit_file.exists():
+                train_audit = pd.read_csv(train_audit_file)
+                fig_reg_train = visualizer.plot_regime_efficacy(train_audit, title="Eficácia de Regimes (Treinamento - W0)")
+                results_mgr.save_plot(fig_reg_train, f'{results_prefix}regime_efficacy_train')
+                
+                fig_heston_train = visualizer.plot_heston_v_results(train_audit, title="Heston (PINN) Evolution during Training (W0)")
+                results_mgr.save_plot(fig_heston_train, f'{results_prefix}heston_evolution_train')
+        except Exception as e:
+            logger.warning(f"Erro ao gerar gráficos detalhados: {e}")
         
     logger.info(" Gráficos gerados e salvos em results/plots/")
     
@@ -1097,7 +1432,12 @@ def optuna_pipeline(
         return {'error': str(e)}
 
 
-def enrich_with_pinn_features(df: pd.DataFrame, assets: List[str]) -> pd.DataFrame:
+def enrich_with_pinn_features(
+    df: pd.DataFrame,
+    assets: List[str],
+    checkpoint_override: Optional[str] = None,
+    stats_override: Optional[str] = None,
+) -> pd.DataFrame:
     """
     Enrich DataFrame with Physics-Informed (PINN) features via Batch Inference.
        
@@ -1114,6 +1454,11 @@ def enrich_with_pinn_features(df: pd.DataFrame, assets: List[str]) -> pd.DataFra
         Wide-format processed data with columns like stock_0_close, stock_1_close, etc.
     assets : List[str]
         List of asset tickers
+    checkpoint_override : str | None
+        If provided, ALL assets use this checkpoint instead of per-asset auto-detection.
+        Typically set by the interactive menu (generalist or specialist selection).
+    stats_override : str | None
+        If provided, ALL assets use this data_stats.json instead of per-asset auto-detection.
         
     Returns
     -------
@@ -1126,6 +1471,10 @@ def enrich_with_pinn_features(df: pd.DataFrame, assets: List[str]) -> pd.DataFra
     logger.info("\nIntegration Architecture:")
     logger.info("   REAL Data (30-day window) → PINN LSTM → Heston Params (κ,θ,ξ,ρ)")
     logger.info("   These physics parameters enrich DRL agent observations")
+    if checkpoint_override:
+        logger.info(f"   Weight Mode: OVERRIDE → {checkpoint_override}")
+    else:
+        logger.info("   Weight Mode: AUTO-DETECT (specialist > generalist fallback)")
     
     try:
         from src.pinn.inference_wrapper import PINNInferenceEngine
@@ -1134,168 +1483,174 @@ def enrich_with_pinn_features(df: pd.DataFrame, assets: List[str]) -> pd.DataFra
         logger.warning(f"PINN modules not found: {e}. Skipping enrichment.")
         return df
 
-    # ========================================================================
-    # Path Resolution: Find trained PINN model
-    # ========================================================================
+    # Determine device
+    device = "cuda" if (torch is not None and torch.cuda.is_available()) else "cpu"
     
-    # Primary path: PINN project
-    checkpoint_path = PROJECT_ROOT / "src" / "pinn" / "weights" /"best_model_weights.pth"
-    stats_path = PROJECT_ROOT / "src" / "pinn" / "weights" / "data_stats.json"
+    # Prepare enriched dataframe
+    enriched_df = df.copy()
     
-    # Fallback paths
-    if not checkpoint_path.exists():
-        checkpoint_path = PROJECT_ROOT / "src" / "pinn" / "weights" /"best_model_weights.pth"
-    if not stats_path.exists():
-        stats_path = PROJECT_ROOT / "src" / "pinn" / "weights" / "data_stats.json"
+    # Loop over ALL assets to enrich
+    for i, asset_name in enumerate(assets):
+        logger.info(f"\n[PINN] Processing Asset {i+1}/{len(assets)}: {asset_name}")
         
-    if not checkpoint_path.exists() or not stats_path.exists():
-        logger.warning(f"⚠️  PINN model files not found:")
-        logger.warning(f"    Checkpoint: {checkpoint_path}")
-        logger.warning(f"    Stats: {stats_path}")
-        logger.warning("    Skipping PINN enrichment.")
-        return df
+        # 1. Resolve weight paths
+        #    Priority: checkpoint_override > specialist dir > generalist fallback
+        if checkpoint_override:
+            # Menu-selected mode: use overridden path for ALL assets
+            checkpoint_path = Path(checkpoint_override)
+            stats_path = Path(stats_override) if stats_override else \
+                         checkpoint_path.parent / "data_stats.json"
+            logger.info(f"       Weights: {checkpoint_path.parent.name}/{checkpoint_path.name} [override]")
+        else:
+            # Auto-detect: prefer specialist then generalist
+            checkpoint_path = PROJECT_ROOT / "src" / "pinn" / "weights" / "best_model_weights.pth"
+            stats_path = PROJECT_ROOT / "src" / "pinn" / "weights" / "data_stats.json"
+            
+            asset_prefix = asset_name[:4]  # e.g. PETR
+            specialist_dir = PROJECT_ROOT / "src" / "pinn" / "weights" / asset_prefix
+            
+            if specialist_dir.exists() and (specialist_dir / "best_model_weights.pth").exists():
+                checkpoint_path = specialist_dir / "best_model_weights.pth"
+                stats_path = specialist_dir / "data_stats.json"
+                logger.info(f"       Using Specialist Weights: {specialist_dir.name}")
+            else:
+                logger.info(f"       Using Generalist Weights (no specialist for {asset_prefix})")
+        
+        if not checkpoint_path.exists():
+            logger.warning(f"       No weights found at {checkpoint_path}. Skipping.")
+            continue
 
-    logger.info(f"\n Found PINN model: {checkpoint_path.name}")
-    
-    # ========================================================================
-    # Initialize PINN Engine
-    # ========================================================================
-    logger.info("Initializing PINN Inference Engine...")
-    try:
-        # Determine device (torch may be None if not installed)
-        device = "cuda" if (torch is not None and torch.cuda.is_available()) else "cpu"
-        engine = PINNInferenceEngine(
-            checkpoint_path=str(checkpoint_path),
-            data_stats_path=str(stats_path),
-            device=device,
-            enable_validation=False
-        )
-        
-        preprocessor = PINNDataPreprocessor(
-            data_stats_path=str(stats_path),
-            verbose=False
-        )
-        logger.info(" PINN Engine initialized")
-    except Exception as e:
-        logger.error(f"Failed to initialize PINN engine: {e}")
-        return df
-    
-    # ========================================================================
-    # Extract Real Price Data (Primary Asset)
-    # ========================================================================
-    primary_prefix = "stock_0_"
-    
-    if f'{primary_prefix}close' not in df.columns:
-        logger.warning(f"Primary asset columns not found. Available: {df.columns.tolist()}")
-        return df
-    
-    logger.info("\n[1/3] Preparing real market data...")
-    
-    # Extract real OHLCV data from primary asset
-    price_data = pd.DataFrame({
-        'date': df['date'],
-        'open': df.get(f'{primary_prefix}open', df[f'{primary_prefix}close']),
-        'high': df.get(f'{primary_prefix}high', df[f'{primary_prefix}close'] * 1.01),
-        'low': df.get(f'{primary_prefix}low', df[f'{primary_prefix}close'] * 0.99),
-        'close': df[f'{primary_prefix}close'],
-        'volume': df.get(f'{primary_prefix}volume', 1.0),
-    })
-    
-    logger.info(f"    Extracted {len(price_data)} days of real market data")
-    logger.info(f"     Date range: {price_data['date'].min().date()} to {price_data['date'].max().date()}")
-    logger.info(f"     Price range: ${price_data['close'].min():.2f} - ${price_data['close'].max():.2f}")
-    
-    # ========================================================================
-    # Create Sliding Windows (30-day observations for PINN)
-    # ========================================================================
-    logger.info("\n[2/3] Creating 30-day sliding windows for PINN...")
-    
-    WINDOW_SIZE = 30  # Standard window for LSTM in PINN
-    
-    try:
-        # Adapt price_data for PINN preprocessor expectations
-        # The preprocessor expects: spot_price, strike, days_to_maturity, r_rate
-        price_data_adapted = price_data.copy()
-        price_data_adapted['spot_price'] = price_data_adapted['close']
-        
-        # For PINN regime sensing on pure price data:
-        # - Strike = ATM (current price)
-        # - Days to maturity = 30 days (standard window)
-        # - Risk-free rate = current Brazil SELIC rate (~10.5%)
-        price_data_adapted['strike'] = price_data_adapted['close']
-        price_data_adapted['days_to_maturity'] = WINDOW_SIZE
-        price_data_adapted['r_rate'] = 0.105  # Brazil SELIC rate
-        price_data_adapted['Dividend_Yield'] = 0.0
-        price_data_adapted['symbol'] = assets[0] if assets else 'ASSET_0'
-        
-        # Use preprocessor to create LSTM features from real data
-        x_seq, x_phy, metadata = preprocessor.calculate_lstm_features(
-            price_data_adapted,
-            window_size=WINDOW_SIZE
-        )
-        
-        if len(x_seq) == 0:
-            logger.warning(f"⚠️  No sequences generated. Dataset might be too short (<{WINDOW_SIZE} days).")
-            return df
-        
-        logger.info(f"    Generated {len(x_seq)} sliding windows")
-        logger.info(f"     Effective coverage: Days {WINDOW_SIZE} to {len(price_data)}")
-        
-    except Exception as e:
-        logger.error(f"Error preparing sliding windows: {e}")
-        logger.error("   Ensure price_data has required columns for PINN preprocessing")
-        return df
-    
-    # ========================================================================
-    # Run PINN Batch Inference (Extract Heston Parameters)
-    # ========================================================================
-    logger.info("\n[3/3] Running PINN batch inference...")
-    logger.info(f"   Inferring: κ (kappa), θ (theta), ξ (xi), ρ (rho)")
-    
-    try:
-        results = engine.infer_heston_params(
-            x_seq,
-            x_phy,
-            return_price=False
-        )
-        
-        logger.info(f"    Inference complete. Extracted parameters from {len(results['kappa'])} windows")
-        
-    except Exception as e:
-        logger.error(f"Batch inference failed: {e}")
-        return df
-    
-    # ========================================================================
-    # Create Results DataFrame and Merge
-    # ========================================================================
-    cols = ['pinn_kappa', 'pinn_theta', 'pinn_xi', 'pinn_rho']
-    
-    # Note: remove pinn_nu from list (not all versions may return it)
-    try:
-        res_df = pd.DataFrame({
-            'date': [m[0] for m in metadata],
-            'pinn_kappa': results['kappa'].flatten() if 'kappa' in results else np.zeros(len(metadata)),
-            'pinn_theta': results['theta'].flatten() if 'theta' in results else np.zeros(len(metadata)),
-            'pinn_xi': results['xi'].flatten() if 'xi' in results else np.zeros(len(metadata)),
-            'pinn_rho': results['rho'].flatten() if 'rho' in results else np.zeros(len(metadata)),
-        })
-    except Exception as e:
-        logger.error(f"Error creating results dataframe: {e}")
-        logger.error(f"Results keys available: {list(results.keys())}")
-        return df
-    
-    # Convert date column
-    res_df['date'] = pd.to_datetime(res_df['date'])
-    
-    # Merge into main DataFrame with forward fill for warmup period
-    df = df.drop(columns=[c for c in cols if c in df.columns], errors='ignore')
-    df = pd.merge(df, res_df, on='date', how='left')
-    
-    # Fill NaNs: forward fill (warmup) then backward fill (end), finally zeros
-    for col in cols:
-        if col in df.columns:
-            df[col] = df[col].ffill().bfill().fillna(0.0)
-    
+        try:
+            # 2. Initialize Engine specifically for this asset
+            engine = PINNInferenceEngine(
+                checkpoint_path=str(checkpoint_path),
+                data_stats_path=str(stats_path),
+                device=device,
+                enable_validation=False,
+                asset_name=asset_name, # Critical: Matches MARL logic
+                verbose=False 
+            )
+            
+            preprocessor = PINNDataPreprocessor(
+                data_stats_path=str(stats_path),
+                verbose=False
+            )
+            
+            # 3. Extract Data for stock_i_
+            col_prefix = f"stock_{i}_"
+            if f'{col_prefix}close' not in df.columns:
+                logger.warning(f"       Columns for {col_prefix} not found. Skipping.")
+                continue
+                
+            price_data = pd.DataFrame({
+                'date': df['date'],
+                'close': df[f'{col_prefix}close'],
+                'volume': df.get(f'{col_prefix}volume', 1.0),
+            })
+            
+            # Adapt for Preprocessor
+            WINDOW_SIZE = 30
+            price_data_adapted = price_data.copy()
+            price_data_adapted['spot_price'] = price_data_adapted['close']
+            price_data_adapted['strike'] = price_data_adapted['close']
+            price_data_adapted['days_to_maturity'] = WINDOW_SIZE
+            price_data_adapted['r_rate'] = 0.105
+            price_data_adapted['Dividend_Yield'] = 0.0
+            price_data_adapted['symbol'] = asset_name
+            
+            # 4. Generate Sequences & Infer
+            x_seq, x_phy, metadata = preprocessor.calculate_lstm_features(
+                price_data_adapted, window_size=WINDOW_SIZE
+            )
+            
+            if len(x_seq) == 0:
+                logger.warning("       Not enough data for inference windows.")
+                continue
+            
+            # Mini-batch inference to prevent OOM with large datasets.
+            # Processing thousands of windows at once (e.g. 1441 for 1470 days) can
+            # exhaust CPU RAM. We chunk into PINN_BATCH_SIZE_INFERENCE sized batches.
+            PINN_INFER_BATCH = 256  # Safe batch size for CPU inference
+            n_windows_total = len(x_seq)
+            all_results = {k: [] for k in ['nu', 'theta', 'kappa', 'xi', 'rho']}
+            
+            logger.info(f"       Inferring {n_windows_total} windows in batches of {PINN_INFER_BATCH}...")
+            for batch_start in range(0, n_windows_total, PINN_INFER_BATCH):
+                batch_end = min(batch_start + PINN_INFER_BATCH, n_windows_total)
+                x_seq_batch = x_seq[batch_start:batch_end]
+                x_phy_batch = x_phy[batch_start:batch_end]
+                
+                try:
+                    batch_results = engine.infer_heston_params(
+                        x_seq_batch, x_phy_batch, return_price=False
+                    )
+                    for k in all_results:
+                        all_results[k].append(batch_results[k])
+                except Exception as batch_err:
+                    logger.warning(f"       Batch [{batch_start}:{batch_end}] failed: {batch_err}. Filling with zeros.")
+                    n_batch = batch_end - batch_start
+                    for k in all_results:
+                        all_results[k].append(np.zeros((n_batch, 1)))
+            
+            # Concatenate batches
+            results = {k: np.vstack(v) for k, v in all_results.items() if v}
+            if not results:
+                logger.warning(f"       All batches failed for {asset_name}. Skipping.")
+                continue
+            
+            # 5. Create Result DF
+            res_df = pd.DataFrame({
+                'date': [m[0] for m in metadata],
+                f'{col_prefix}pinn_kappa': results['kappa'].flatten(),
+                f'{col_prefix}pinn_theta': results['theta'].flatten(),
+                f'{col_prefix}pinn_xi': results['xi'].flatten(),
+                f'{col_prefix}pinn_rho': results['rho'].flatten(),
+                f'{col_prefix}pinn_nu': results['nu'].flatten(),
+            })
+            
+            res_df['date'] = pd.to_datetime(res_df['date'])
+            
+            # 5b. AGGREGATE BY DATE
+            # res_df currently has one row per option/window. 
+            # DRL needs one row per day. We take the mean.
+            logger.debug(f"       Aggregating {len(res_df)} inference windows to daily resolution...")
+            res_df = res_df.groupby('date').mean().reset_index()
+            
+            # 5c. Global Consolidation
+            # K-Means Regime Detector uses 'pinn_nu', 'pinn_xi', 'pinn_rho' (no prefix).
+            # Strategy: Maintain a global average across all processed assets for a portfolio-level signal.
+            for param in ['kappa', 'theta', 'xi', 'rho', 'nu']:
+                generic_col = f'pinn_{param}'
+                asset_col = f'{col_prefix}pinn_{param}'
+                
+                if generic_col in enriched_df.columns:
+                    # Rolling mean: (Existing Global Value + Current Asset Value) / 2
+                    existing_data = enriched_df.set_index('date')[generic_col]
+                    # Map existing data back to res_df dates
+                    res_df[generic_col] = (res_df['date'].map(existing_data).fillna(res_df[asset_col]) + res_df[asset_col]) / 2.0
+                else:
+                    # First asset processed establishes the baseline
+                    res_df[generic_col] = res_df[asset_col]
+            
+            # 6. Merge
+            # Identify columns to merge (exclude date)
+            cols_to_merge = [c for c in res_df.columns if c != 'date']
+            
+            # Drop existing if any (to avoid duplicates/suffixes)
+            enriched_df = enriched_df.drop(columns=[c for c in cols_to_merge if c in enriched_df.columns], errors='ignore')
+            enriched_df = pd.merge(enriched_df, res_df, on='date', how='left')
+            
+            # Fill NaNs
+            for col in cols_to_merge:
+                enriched_df[col] = enriched_df[col].ffill().bfill().fillna(0.0).astype(np.float64)
+                
+            logger.info(f"       ✓ Inferred {len(results['kappa'])} windows for {asset_name}")
+            
+        except Exception as e:
+            logger.error(f"       Error inferring for {asset_name}: {e}")
+            # Continue to next asset instead of breaking pipeline
+            continue
+            
     # ========================================================================
     # Summary & Validation
     # ========================================================================
@@ -1303,24 +1658,181 @@ def enrich_with_pinn_features(df: pd.DataFrame, assets: List[str]) -> pd.DataFra
     logger.info("PINN Feature Enrichment Complete")
     logger.info("="*70)
     
-    logger.info("\nHeston Market Regime Parameters:")
-    for col in cols:
-        if col in df.columns:
-            valid_vals = df[col][df[col] != 0.0]
+    # Validation Log based on Asset 0 (Primary)
+    check_cols = ['pinn_kappa', 'pinn_xi', 'pinn_rho']
+    logger.info("\nPrimary Asset Regime Parameters (Sample):")
+    for col in check_cols:
+        if col in enriched_df.columns:
+            valid_vals = enriched_df[col][enriched_df[col] != 0.0]
             if len(valid_vals) > 0:
                 logger.info(f"   {col:12s}: {valid_vals.mean():8.4f} ± {valid_vals.std():8.4f} "
                            f"(n={len(valid_vals):5d})")
     
-    logger.info(f"\n DataFrame enriched with {len(cols)} physics-informed features")
-    logger.info(f"Final shape: {df.shape}")
-    logger.info("\n These features enable DRL agent to recognize market regimes:")
-    logger.info("   • κ (kappa): Volatility Mean-Reversion Speed")
-    logger.info("   • θ (theta): Long-term Volatility Level") 
-    logger.info("   • ξ (xi):    Volatility of Volatility (Tail Risk)")
-    logger.info("   • ρ (rho):   Price-Vol Correlation (Leverage Effects)")
+    logger.info(f"\n DataFrame enriched. Final shape: {enriched_df.shape}")
     logger.info("="*70 + "\n")
     
-    return df
+    return enriched_df
+
+
+def interactive_asset_selector() -> dict:
+    """
+    Interactive Rich terminal menu for asset and PINN weight selection.
+    
+    Returns
+    -------
+    dict with keys:
+        'assets': List[str] - assets to trade
+        'pinn_mode': str     - 'generalist' | 'specialist' | 'none'
+        'pinn_checkpoint': str | None - path to checkpoint
+        'pinn_stats': str | None      - path to data_stats.json
+    """
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich import box
+    from pathlib import Path
+    
+    c = Console()
+    weights_root = PROJECT_ROOT / "src" / "pinn" / "weights"
+    generalist_ckpt  = weights_root / "best_model_weights.pth"
+    generalist_stats = weights_root / "data_stats.json"
+    
+    # Discover available specialist assets
+    specialists = {}
+    for d in sorted(weights_root.iterdir()):
+        if d.is_dir():
+            ckpt  = d / "best_model_weights.pth"
+            stats = d / "data_stats.json"
+            if ckpt.exists() and stats.exists():
+                # specialist directory name maps to asset prefix (e.g. PETR → PETR4)
+                prefix = d.name.upper()  # e.g. PETR, VALE, ABEV
+                specialists[prefix] = {'ckpt': str(ckpt), 'stats': str(stats)}
+    
+    c.print()
+    c.print(Panel(
+        "[bold cyan]Rolling Ensemble — Asset & PINN Weight Selection[/bold cyan]\n"
+        "[dim]Heston parameters calibrated by PINN drive the K-Means Regime Detector.[/dim]",
+        border_style="blue", box=box.DOUBLE
+    ))
+    
+    # ---- Option table ----
+    opt_tbl = Table(show_header=True, box=box.SIMPLE_HEAVY, expand=False)
+    opt_tbl.add_column("#", style="bold yellow", width=3)
+    opt_tbl.add_column("Mode", style="bold white", width=35)
+    opt_tbl.add_column("Assets", style="cyan")
+    opt_tbl.add_column("PINN Weights", style="magenta")
+    
+    opt_tbl.add_row(
+        "1",
+        "Use Defaults",
+        "PETR4, VALE3",
+        f"Generalist  ({generalist_ckpt.name})" if generalist_ckpt.exists() else "[red]⚠ not found[/red]"
+    )
+    opt_tbl.add_row(
+        "2",
+        "Enter Custom Assets",
+        "[dim]type your own...[/dim]",
+        f"Generalist  ({generalist_ckpt.name})" if generalist_ckpt.exists() else "[red]⚠ not found[/red]"
+    )
+    
+    # One row per specialist
+    for prefix, info in specialists.items():
+        # Map prefix to canonical asset name (add suffix if not present)
+        # e.g. PETR → PETR4, VALE → VALE3, ABEV → ABEV3
+        suffix_map = {'PETR': 'PETR4', 'VALE': 'VALE3', 'ABEV': 'ABEV3', 'BBAS': 'BBAS3',
+                      'CSNA': 'CSNA3', 'MGLU': 'MGLU3', 'B3SA': 'B3SA3', 'BOVA': 'BOVA11'}
+        canon = suffix_map.get(prefix, prefix)
+        opt_tbl.add_row(
+            "3" if prefix == list(specialists.keys())[0] else " ",
+            f"Individual Specialist: {canon}",
+            canon,
+            f"Specialist  ({prefix}/best_model_weights.pth)"
+        )
+    
+    c.print(opt_tbl)
+    c.print()
+    
+    # ---- Get choice ----
+    valid_choices = {"1", "2"}
+    specialist_list = list(specialists.keys())
+    if specialist_list:
+        valid_choices.add("3")
+    
+    choice = ""
+    while choice not in valid_choices:
+        choice = c.input("[bold yellow]Select mode[/bold yellow] (1/2/3): ").strip()
+        if choice not in valid_choices:
+            c.print(f"[red]Invalid choice. Please enter {'/'.join(sorted(valid_choices))}.[/red]")
+    
+    # ---- Mode 1: Defaults ----
+    if choice == "1":
+        assets = ["PETR4", "VALE3"]
+        pinn_mode = "generalist" if generalist_ckpt.exists() else "none"
+        c.print(f"[green]✓ Defaults selected:[/green] {assets}")
+        c.print(f"[green]✓ PINN:[/green] Generalist weights ({generalist_ckpt})")
+        return {
+            'assets': assets,
+            'pinn_mode': pinn_mode,
+            'pinn_checkpoint': str(generalist_ckpt) if generalist_ckpt.exists() else None,
+            'pinn_stats': str(generalist_stats) if generalist_stats.exists() else None,
+        }
+    
+    # ---- Mode 2: Custom ----
+    if choice == "2":
+        raw = c.input(
+            "[bold yellow]Enter asset tickers separated by spaces[/bold yellow] "
+            "(e.g. PETR4 VALE3 BBAS3): "
+        ).strip().upper()
+        assets = [a.strip() for a in raw.split() if a.strip()]
+        if not assets:
+            c.print("[red]No assets entered. Falling back to defaults (PETR4, VALE3).[/red]")
+            assets = ["PETR4", "VALE3"]
+        pinn_mode = "generalist" if generalist_ckpt.exists() else "none"
+        c.print(f"[green]✓ Custom assets:[/green] {assets}")
+        c.print(f"[green]✓ PINN:[/green] Generalist weights")
+        return {
+            'assets': assets,
+            'pinn_mode': pinn_mode,
+            'pinn_checkpoint': str(generalist_ckpt) if generalist_ckpt.exists() else None,
+            'pinn_stats': str(generalist_stats) if generalist_stats.exists() else None,
+        }
+    
+    # ---- Mode 3: Specialist ----
+    if choice == "3":
+        if len(specialist_list) == 1:
+            selected_prefix = specialist_list[0]
+        else:
+            # Sub-menu to pick specialist
+            c.print("\n[bold]Available specialists:[/bold]")
+            suffix_map = {'PETR': 'PETR4', 'VALE': 'VALE3', 'ABEV': 'ABEV3', 'BBAS': 'BBAS3',
+                          'CSNA': 'CSNA3', 'MGLU': 'MGLU3', 'B3SA': 'B3SA3', 'BOVA': 'BOVA11'}
+            for idx, prefix in enumerate(specialist_list, start=1):
+                canon = suffix_map.get(prefix, prefix)
+                c.print(f"  [yellow]{idx}[/yellow]. {canon}  (weights: {prefix}/)")
+            
+            sub_choice = ""
+            while not sub_choice.isdigit() or int(sub_choice) not in range(1, len(specialist_list) + 1):
+                sub_choice = c.input("[bold yellow]Select specialist[/bold yellow]: ").strip()
+            selected_prefix = specialist_list[int(sub_choice) - 1]
+        
+        suffix_map = {'PETR': 'PETR4', 'VALE': 'VALE3', 'ABEV': 'ABEV3', 'BBAS': 'BBAS3',
+                      'CSNA': 'CSNA3', 'MGLU': 'MGLU3', 'B3SA': 'B3SA3', 'BOVA': 'BOVA11'}
+        canon_asset = suffix_map.get(selected_prefix, selected_prefix)
+        assets = [canon_asset]
+        info = specialists[selected_prefix]
+        
+        c.print(f"[green]✓ Specialist selected:[/green] {canon_asset}")
+        c.print(f"[green]✓ PINN:[/green] Specialist weights ({selected_prefix}/)")
+        return {
+            'assets': assets,
+            'pinn_mode': 'specialist',
+            'pinn_checkpoint': info['ckpt'],
+            'pinn_stats': info['stats'],
+        }
+    
+    # Fallback (should never reach here)
+    return {'assets': PRIMARY_ASSETS, 'pinn_mode': 'none',
+            'pinn_checkpoint': None, 'pinn_stats': None}
 
 
 def main():
@@ -1330,7 +1842,7 @@ def main():
     )
     parser.add_argument(
         '--mode',
-        choices=['simple-pipeline', 'rolling-ensemble', 'optuna-optimize'],
+        choices=['simple-pipeline', 'rolling-ensemble', 'optuna-optimize', 'baseline-comparison'],
         default='rolling-ensemble',
         help='Pipeline mode to execute'
     )
@@ -1349,14 +1861,25 @@ def main():
     parser.add_argument(
         '--assets',
         nargs='+',
-        default=PRIMARY_ASSETS,
-        help='Assets to trade'
+        default=None,   # None = trigger interactive menu for rolling-ensemble
+        help='Assets to trade. If omitted in rolling-ensemble mode, shows interactive selection menu.'
+    )
+    parser.add_argument(
+        '--asset-mode',
+        choices=['defaults', 'custom', 'specialist'],
+        default=None,
+        help='(Non-interactive) asset selection mode: defaults|custom|specialist'
+    )
+    parser.add_argument(
+        '--specialist',
+        default=None,
+        help='(Non-interactive) specialist prefix, e.g. PETR (requires --asset-mode specialist)'
     )
     parser.add_argument(
         '--pinn-features',
         action='store_true',
         default=False,
-        help='Enable PINN features in trading environment'
+        help='Enable PINN features in trading environment (observation space)'
     )
     parser.add_argument(
         '--ab-testing',
@@ -1370,9 +1893,54 @@ def main():
         default=False,
         help='Fine-tune PINN model during training (if available)'
     )
+    parser.add_argument(
+        '--no-menu',
+        action='store_true',
+        default=False,
+        help='Skip interactive menu; use --assets or PRIMARY_ASSETS from config directly'
+    )
     
     args = parser.parse_args()
     
+    # =========================================================================
+    # ASSET SELECTION: interactive menu OR non-interactive CLI flags
+    # =========================================================================
+    # The interactive menu is shown when:
+    #   - Mode is rolling-ensemble  AND
+    #   - --assets was not explicitly given  AND
+    #   - --no-menu was not passed
+    pinn_checkpoint_override = None  # path to use instead of auto-detection
+    pinn_stats_override = None
+    
+    is_rolling = args.mode in ('rolling-ensemble', 'baseline-comparison')
+    wants_menu = is_rolling and args.assets is None and not args.no_menu
+    
+    if wants_menu:
+        selection = interactive_asset_selector()
+        args.assets = selection['assets']
+        pinn_mode   = selection['pinn_mode']         # 'generalist' | 'specialist' | 'none'
+        pinn_checkpoint_override = selection['pinn_checkpoint']
+        pinn_stats_override      = selection['pinn_stats']
+        # Automatically enable PINN features if specialist/generalist weights found
+        if pinn_mode in ('generalist', 'specialist') and PINN_AVAILABLE:
+            args.pinn_features = True
+    else:
+        # Non-interactive: resolve from CLI flags or defaults
+        if args.assets is None:
+            args.assets = PRIMARY_ASSETS
+        
+        if args.asset_mode == 'specialist' and args.specialist:
+            weights_root = PROJECT_ROOT / "src" / "pinn" / "weights"
+            spec_dir = weights_root / args.specialist.upper()
+            pinn_checkpoint_override = str(spec_dir / "best_model_weights.pth") if spec_dir.exists() else None
+            pinn_stats_override      = str(spec_dir / "data_stats.json") if spec_dir.exists() else None
+        elif args.asset_mode in ('defaults', 'custom', None):
+            weights_root = PROJECT_ROOT / "src" / "pinn" / "weights"
+            generalist_ckpt  = weights_root / "best_model_weights.pth"
+            generalist_stats = weights_root / "data_stats.json"
+            pinn_checkpoint_override = str(generalist_ckpt)  if generalist_ckpt.exists()  else None
+            pinn_stats_override      = str(generalist_stats) if generalist_stats.exists() else None
+
     #  REPRODUCIBILITY: Set random seeds FIRST (before any random operations)
     set_all_seeds(seed=42, verbose=True)
     assert_reproducible()
@@ -1413,6 +1981,28 @@ def main():
         
         if not options_data:
             raise ValueError("No data loaded. Aborting.")
+            
+        # 1.5 Temporal Filter (QA MASTER Alignment)
+        # We filter here so the audit CSV and all plots only see the target period (2023-2025)
+        logger.info(f"\n[Temporal Alignment] Filtering raw data: {TRAIN_START} to {VAL_END}")
+        start_dt = pd.to_datetime(TRAIN_START).date()
+        end_dt = pd.to_datetime(VAL_END).date()
+        
+        filtered_options = {}
+        for asset, df_opt in options_data.items():
+            # index is (date, asset). date level is 0.
+            mask = (df_opt.index.get_level_values(0) >= start_dt) & \
+                   (df_opt.index.get_level_values(0) <= end_dt)
+            df_filtered = df_opt[mask].copy()
+            if not df_filtered.empty:
+                filtered_options[asset] = df_filtered
+                logger.info(f"  {asset}: {len(df_filtered)} rows remaining.")
+            else:
+                logger.warning(f"  {asset}: No data remaining after filter!")
+        
+        options_data = filtered_options
+        if not options_data:
+            raise ValueError("No data remaining after temporal filter! Check config.py dates.")
         
         # 2. Prepare DRL dataset (daily OHLCV + indicators)
         logger.info("\nPreparing DRL observation dataset...")
@@ -1423,17 +2013,29 @@ def main():
         logger.info("\nPreparing PINN inference dataset...")
         df_pinn = prepare_pinn_dataset(options_data_dict)
         
-        # 4. Run PINN inference if enabled
-        pinn_features = None
-        if pinn_features_enabled:
-            logger.info("\nRunning PINN batch inference...")
+        # 4. Run PINN inference — only if requested or A/B testing is enabled.
+        # Reason: The K-Means Regime Detector needs pinn_nu/xi/rho columns 
+        # to learn dynamic market regime boundaries, but we should respect the --no-pinn flag.
+        if PINN_AVAILABLE and (pinn_features_enabled or ab_testing_enabled):
+            # Log which weights will be used
+            if pinn_checkpoint_override:
+                logger.info(f"\n[PINN] Weight override active: {pinn_checkpoint_override}")
+            else:
+                logger.info("\n[PINN] Using auto-detected weights (specialist if available, else generalist)")
+            logger.info("Running PINN batch inference (required for K-Means Regime Detection)...")
             try:
-                # TODO: Implement batch inference on df_pinn
-                # For now, use legacy function
-                df_drl = enrich_with_pinn_features(df_drl, args.assets)
+                df_drl = enrich_with_pinn_features(
+                    df_drl,
+                    args.assets,
+                    checkpoint_override=pinn_checkpoint_override,
+                    stats_override=pinn_stats_override,
+                )
+                logger.info("✅ PINN enrichment complete. Heston columns available for K-Means.")
             except Exception as e:
-                logger.warning(f"PINN inference failed: {e}. Proceeding without features.")
-                pinn_features_enabled = False
+                logger.warning(f"PINN enrichment failed: {e}. K-Means will use static fallback.")
+                if pinn_features_enabled:
+                    logger.warning("   --pinn-features requested but enrichment failed. Disabling PINN obs.")
+                    pinn_features_enabled = False
         
         # ✓ Validate input safety before expensive RL training
         logger.info("\nValidating inputs...")
@@ -1448,69 +2050,85 @@ def main():
         # Note: PINN features already merged into df_drl above
         
         # Execute pipeline
-        if args.mode == 'simple-pipeline':
+        if args.mode == "simple-pipeline":
             results = simple_pipeline(df_drl, assets=args.assets)
-        elif args.mode == 'optuna-optimize':
+        elif args.mode == "optuna-optimize":
             results = optuna_pipeline(
                 df_drl,
                 assets=args.assets,
                 agent_type=args.agent_type,
                 n_trials=args.n_trials,
             )
-        else:  # rolling-ensemble
+        elif args.mode == "rolling-ensemble":
             if ab_testing_enabled:
                 logger.info("\n" + "="*50)
-                logger.info("🔰 EXECUTING A/B TEST: Baseline vs PINN-Enhanced")
+                logger.info("EXECUTING A/B TEST: Baseline vs PINN-Enhanced")
                 logger.info("="*50)
                 
-                # --- Group B: Baseline (Control) ---
                 logger.info("\n>>>Running Group B: Baseline (No PINN)...")
                 results_b = rolling_window_ensemble(
                     df_drl,
+                    assets=args.assets,
                     pinn_engine=None,
                     pinn_features_enabled=False,
                     ab_testing_enabled=True,
                     results_prefix="group_B_baseline_"
                 )
                 
-                # --- Group A: Experiment (Treatment) ---
                 logger.info("\n>>> Running Group A: Experiment (With PINN)...")
                 
                 results_a = rolling_window_ensemble(
                     df_drl,
+                    assets=args.assets,
                     pinn_engine=None,
                     pinn_features_enabled=True,
                     ab_testing_enabled=True,
                     results_prefix="group_A_pinn_"
                 )
                 
-                # Retrieve aggregated summary for logging
-                summary_b = results_b.get('aggregated', {})
-                summary_a = results_a.get('aggregated', {})
+                summary_b = results_b.get("aggregated", {})
+                summary_a = results_a.get("aggregated", {})
                 
                 logger.info("\n" + "="*50)
                 logger.info("A/B TEST QUICK SUMMARY")
                 logger.info("="*50)
                 logger.info(f"{'Metric':<20} | {'Baseline (B)':<15} | {'PINN (A)':<15} | {'Diff':<10}")
                 logger.info("-" * 65)
-                for metric in ['avg_ensemble_reward', 'avg_ensemble_annual_return']:
+                for metric in ["avg_ensemble_reward", "avg_ensemble_annual_return"]:
                     val_b = summary_b.get(metric, 0.0)
                     val_a = summary_a.get(metric, 0.0)
                     diff = val_a - val_b
                     logger.info(f"{metric:<20} | {val_b:>15.4f} | {val_a:>15.4f} | {diff:>+10.4f}")
                 logger.info("="*50)
                 
-                results = {'group_a': results_a, 'group_b': results_b}
+                results = {"group_a": results_a, "group_b": results_b}
                 
             else:
-                # Standard single run
                 logger.info("\nExecuting Rolling Window Ensemble...")
                 results = rolling_window_ensemble(
                     df_drl,
+                    assets=args.assets,
                     pinn_engine=None,
                     pinn_features_enabled=pinn_features_enabled,
                     ab_testing_enabled=False
                 )
+        elif args.mode == "baseline-comparison":
+            logger.info("\n" + "="*50)
+            logger.info("EXECUTING BASELINE COMPARISON: DRL vs Benchmark (No PINN)")
+            logger.info("="*50)
+            
+            results = rolling_window_ensemble(
+                df_drl,
+                assets=args.assets,
+                pinn_engine=None,
+                pinn_features_enabled=False,
+                ab_testing_enabled=False,
+                results_prefix="baseline_comparison_",
+                minimal_plots=True
+            )
+        else:
+            logger.error(f"Unknown mode: {args.mode}")
+            raise ValueError(f"Unknown mode: {args.mode}")
         
         logger.info("\n" + "="*70)
         logger.info("Pipeline Complete!")

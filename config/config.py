@@ -41,13 +41,14 @@ PRIMARY_ASSETS: List[str] = ["PETR4", "VALE3"]
 GLOBAL_START = "2019-01-01"
 GLOBAL_END = "2025-12-31"
 
-# Temporal splits: Train (≤2023), Test (2024), Validation (2025+)
-TRAIN_START = "2019-01-01"
-TRAIN_END = "2023-12-31"      # ← Train/Fine-tune until end of 2023
-TEST_START = "2024-01-01"
-TEST_END = "2024-12-31"        # ← Test entire 2024
-VAL_START = "2025-01-01"
-VAL_END = "2025-12-31"         # ← Validation in 2025
+# Temporal splits: Train (2023-2024), Test (2025-H1), Validation (2025-H2)
+TRAIN_START = "2023-01-01"
+TRAIN_END = "2024-12-31"      # ← Train/Fine-tune until end of 2024
+TEST_START = "2025-01-01"
+TEST_END = "2025-06-30"        # ← Test first semester of 2025
+VAL_START = "2025-07-01"
+VAL_END = "2025-12-31"         # ← Validation until end of 2025 (approx 05/12)
+
 
 # Current strategy uses rolling window (see ROLLING_WINDOW_CONFIG)
 # For fixed splits, use TRAIN_START/END and TEST_START/END above

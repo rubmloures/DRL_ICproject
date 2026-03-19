@@ -203,25 +203,42 @@ class ResultsManager:
         self,
         fig: Any,
         name: str,
-        fmt: str = 'png',
+        fmt: str = 'html',
     ) -> Path:
         """
-        Save a matplotlib figure.
+        Save a plot (supports Matplotlib and Plotly).
         
         Args:
-            fig: Matplotlib figure
+            fig: Plot figure object (plt.Figure or go.Figure)
             name: Name for the plot
-            fmt: File format (png, pdf, jpg)
+            fmt: File format ('html' for interactive plotly, 'png', 'pdf' for static)
         
         Returns:
             Path to saved plot
         """
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{name}_{ts}.{fmt}"
+        
+        # Determine actual extension
+        import plotly.graph_objects as go
+        if isinstance(fig, go.Figure):
+            ext = 'html' if fmt == 'html' else fmt
+        else:
+            ext = 'png' if fmt == 'html' else fmt
+            
+        filename = f"{name}_{ts}.{ext}"
         filepath = self.plots_dir / filename
         
         try:
-            fig.savefig(filepath, dpi=150, bbox_inches='tight')
+            if isinstance(fig, go.Figure):
+                if ext == 'html':
+                    fig.write_html(str(filepath))
+                else:
+                    # Generic image write (requires kaleido)
+                    fig.write_image(str(filepath))
+            else:
+                # Assume Matplotlib
+                fig.savefig(filepath, dpi=150, bbox_inches='tight')
+                
             logger.info(f"Saved plot to {filepath}")
             return filepath
         except Exception as e:

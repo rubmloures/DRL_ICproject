@@ -25,13 +25,19 @@ def select_mode() -> str:
     console.print("1. [bold cyan]Simple Pipeline[/bold cyan] (Quick Test: Train/Test Split)")
     console.print("2. [bold cyan]Rolling Ensemble[/bold cyan] (Production: Cross-Validation)")
     console.print("3. [bold cyan]Optuna Optimization[/bold cyan] (Hyperparameter Tuning)")
+    console.print("4. [bold magenta]MARL Specialist Pipeline[/bold magenta] (Multi-Agent RL with Coordinator)")
+    console.print("5. [bold magenta]Parallel Asset Ensemble[/bold magenta] (Independent PPO+A2C+DDPG per Asset)")
+    console.print("6. [bold blue]Baseline Comparison[/bold blue] (No PINN: DRL vs Benchmark)")
     
-    choice = Prompt.ask("Choose an option", choices=["1", "2", "3"], default="2")
+    choice = Prompt.ask("Choose an option", choices=["1", "2", "3", "4", "5", "6"], default="5")
     
     mapping = {
         "1": "simple-pipeline",
         "2": "rolling-ensemble",
-        "3": "optuna-optimize"
+        "3": "optuna-optimize",
+        "4": "marl-specialist",
+        "5": "parallel-ensemble",
+        "6": "baseline-comparison"
     }
     return mapping[choice]
 
@@ -40,12 +46,17 @@ def select_assets() -> List[str]:
     console.print(Panel("Asset Selection", style="bold yellow"))
     console.print(f"1. Use Defaults: [bold]{', '.join(DEFAULT_ASSETS)}[/bold]")
     console.print("2. Enter Custom Assets")
+    console.print("3. Individual Asset Specialist [dim](Default: PETR4)[/dim]")
     
-    choice = Prompt.ask("Choose an option", choices=["1", "2"], default="1")
+    choice = Prompt.ask("Choose an option", choices=["1", "2", "3"], default="1")
     
     if choice == "2":
         assets_input = Prompt.ask("Enter assets separated by space (e.g., PETR4 ABEV3)")
         return assets_input.split()
+    elif choice == "3":
+        asset = Prompt.ask("Enter Specialist Asset", default="PETR4")
+        return [asset.strip()]
+        
     return DEFAULT_ASSETS
 
 def configure_pinn() -> dict:
@@ -81,6 +92,19 @@ def configure_optuna() -> dict:
 
 def build_command(mode: str, assets: List[str], pinn_config: dict, optuna_config: dict = None) -> List[str]:
     """Construct the command line arguments."""
+    if mode == "marl-specialist":
+        # MARL uses its own script for now
+        cmd = [sys.executable, "main_marl_specialist.py"]
+        return cmd
+        
+    if mode == "parallel-ensemble":
+        cmd = [sys.executable, "main_parallel_ensemble.py"]
+        cmd.append("--assets")
+        cmd.extend(assets)
+        if not pinn_config.get("pinn-features"):
+            cmd.append("--no-pinn")
+        return cmd
+        
     cmd = [sys.executable, "main.py", "--mode", mode]
     
     # Add Assets
@@ -119,6 +143,9 @@ def main():
         pinn_config = configure_pinn()
     elif mode == "optuna-optimize":
         optuna_config = configure_optuna()
+    elif mode == "baseline-comparison":
+        # No PINN for baseline comparison
+        pinn_config = {"pinn-features": False}
     else:
         # Simple pipeline can also use PINN features if desired
         if Confirm.ask("Enable PINN features for simple pipeline?"):
@@ -133,13 +160,13 @@ def main():
     console.print("="*50 + "\n")
     
     if Confirm.ask("Execute this command now?"):
-        console.print("[bold green]🚀 Launching...[/bold green]\n")
+        console.print("[bold green]Launching...[/bold green]\n")
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError as e:
-            console.print(f"[bold red]❌ Execution failed with code {e.returncode}[/bold red]")
+            console.print(f"[bold red]Execution failed with code {e.returncode}[/bold red]")
         except KeyboardInterrupt:
-            console.print("\n[bold yellow]⚠️ Execution interrupted by user[/bold yellow]")
+            console.print("\n[bold yellow]Execution interrupted by user[/bold yellow]")
     else:
         console.print("[yellow]Execution cancelled.[/yellow]")
 

@@ -162,110 +162,84 @@ class RollingWindowStrategy:
         """
         Generate rolling train/test window pairs with purged embargo gap.
         
-        The embargo removes `purge_days` observations between the end of
-        the training window and the start of the test window, breaking
-        serial correlation that would otherwise cause data leakage.
-        
-        Layout per window (with purge_days=5):
-        
-            ┌───────── TRAIN ─────────┐ EMBARGO ┌──── TEST ────┐
-            │ idx[0] ... idx[train-1] │  5 days │ ... idx[end] │
-            └─────────────────────────┘█████████└──────────────┘
-        
-        Yields
-        ------
-        train_df : pd.DataFrame
-            Training data for this window (before embargo)
-        test_df : pd.DataFrame
-            Testing data for this window (after embargo)
-        window_idx : int
-            Window index (0, 1, 2, ...)
-        date_range : dict
-            Dictionary with 'train_start', 'train_end', 'test_start', 'test_end',
-            'purge_start', 'purge_end', 'purge_days'
-        
-        Example
-        -------
-        >>> for train_df, test_df, idx, dates in strategy.generate_rolling_windows():
-        ...     print(f"Window {idx}: {dates['train_start']} to {dates['test_end']}")
-        ...     print(f"  Embargo gap: {dates['purge_days']} days")
+        This refactored version uses UNIQUE DATES to define windows, making it
+        resilient to datasets with multiple rows per day (e.g. options chains).
         """
-        total_length = len(self.df)
-        # Minimum required: train + purge + test
-        min_required = self.train_days + self.purge_days + self.test_days
+        # Ensure data is sorted by date
+        self.df = self.df.sort_values('data').reset_index(drop=True)
+        unique_dates = pd.Series(self.df['data'].unique()).sort_values().reset_index(drop=True)
+        total_days = len(unique_dates)
         
-        if total_length < min_required:
+        # Minimum required: train + purge + test (in days)
+        min_required_days = self.train_days + self.purge_days + self.test_days
+        
+        if total_days < min_required_days:
             logger.warning(
-                f"Data too short ({total_length} days) for at least one window "
-                f"({min_required} days required: {self.train_days} train + "
-                f"{self.purge_days} purge + {self.test_days} test)"
+                f"Data too short ({total_days} unique days) for at least one window "
+                f"({min_required_days} days required)"
             )
             return
         
-        n_windows = ((total_length - min_required) // self.shift_days) + 1
-        logger.info(f"Generating {n_windows} purged rolling windows (embargo={self.purge_days}d)...")
+        # Calculate number of windows based on unique dates
+        n_windows = ((total_days - min_required_days) // self.shift_days) + 1
+        logger.info(f"Generating {n_windows} purged rolling windows (embargo={self.purge_days}d) based on unique dates...")
         
         for window_idx in range(n_windows):
-            # Calculate indices for this window
-            start_idx = window_idx * self.shift_days
-            train_end_idx = start_idx + self.train_days
+            # Calculate date offsets
+            start_date_idx = window_idx * self.shift_days
+            train_end_date_idx = start_date_idx + self.train_days
             
             # --- PURGE EMBARGO: skip `purge_days` observations ---
-            purge_start_idx = train_end_idx
-            purge_end_idx = train_end_idx + self.purge_days
+            purge_start_date_idx = train_end_date_idx
+            purge_end_date_idx = train_end_date_idx + self.purge_days
             
             # Test starts AFTER the embargo gap
-            test_start_idx = purge_end_idx
-            test_end_idx = test_start_idx + self.test_days
+            test_start_date_idx = purge_end_date_idx
+            test_end_date_idx = test_start_date_idx + self.test_days
             
-            # Check bounds
-            if test_end_idx > len(self.df):
-                logger.debug(f"Window {window_idx} exceeds data length, stopping")
+            # Bounds check on unique dates
+            if test_end_date_idx > total_days:
                 break
+                
+            # Identificar as datas físicas
+            d_train_start = unique_dates.iloc[start_date_idx]
+            d_train_end = unique_dates.iloc[train_end_date_idx - 1]
+            d_test_start = unique_dates.iloc[test_start_date_idx]
+            d_test_end = unique_dates.iloc[test_end_date_idx - 1]
             
-            # Extract data (train and test are NOT adjacent — embargo gap in between)
-            train_df = self.df.iloc[start_idx:train_end_idx].copy()
-            test_df = self.df.iloc[test_start_idx:test_end_idx].copy()
+            # Extrair fatias do DataFrame original usando as datas
+            train_df = self.df[(self.df['data'] >= d_train_start) & (self.df['data'] <= d_train_end)].copy()
+            test_df = self.df[(self.df['data'] >= d_test_start) & (self.df['data'] <= d_test_end)].copy()
             
-            # Get date range info including embargo details
-            train_start = train_df['data'].iloc[0]
-            train_end = train_df['data'].iloc[-1]
-            test_start = test_df['data'].iloc[0]
-            test_end = test_df['data'].iloc[-1]
-            
+            # Validar se as fatias não estão vazias
+            if train_df.empty or test_df.empty:
+                logger.warning(f"Window {window_idx} has empty train or test set. Skipping.")
+                continue
+
             # Embargo dates (the purged observations)
+            purge_start_date = None
+            purge_end_date = None
             if self.purge_days > 0:
-                purge_df = self.df.iloc[purge_start_idx:purge_end_idx]
-                purge_start_date = purge_df['data'].iloc[0] if len(purge_df) > 0 else None
-                purge_end_date = purge_df['data'].iloc[-1] if len(purge_df) > 0 else None
-            else:
-                purge_start_date = None
-                purge_end_date = None
+                d_purge_start = unique_dates.iloc[purge_start_date_idx]
+                d_purge_end = unique_dates.iloc[purge_end_date_idx - 1]
+                purge_start_date = d_purge_start
+                purge_end_date = d_purge_end
             
             date_range = {
-                'train_start': train_start,
-                'train_end': train_end,
-                'test_start': test_start,
-                'test_end': test_end,
+                'train_start': d_train_start,
+                'train_end': d_train_end,
+                'test_start': d_test_start,
+                'test_end': d_test_end,
                 # Purge/Embargo metadata
                 'purge_start': purge_start_date,
                 'purge_end': purge_end_date,
                 'purge_days': self.purge_days,
             }
             
-            if self.purge_days > 0:
-                logger.debug(
-                    f"Window {window_idx}: "
-                    f"Train[{start_idx}:{train_end_idx}] "
-                    f"EMBARGO[{purge_start_idx}:{purge_end_idx}] ({self.purge_days}d) "
-                    f"Test[{test_start_idx}:{test_end_idx}]"
-                )
-            else:
-                logger.debug(
-                    f"Window {window_idx}: "
-                    f"Train[{start_idx}:{train_end_idx}] "
-                    f"Test[{test_start_idx}:{test_end_idx}]"
-                )
+            logger.debug(
+                f"Window {window_idx}: {d_train_start.date()} to {d_test_end.date()} "
+                f"(Train rows: {len(train_df)}, Test rows: {len(test_df)})"
+            )
             
             yield train_df, test_df, window_idx, date_range
     

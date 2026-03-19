@@ -99,7 +99,7 @@ DEFAULT_PPO_PARAMS: Dict[str, Any] = {
     "gamma": 0.99,
     "gae_lambda": 0.95,
     "clip_range": 0.2,
-    "ent_coef": 0.01,
+    "ent_coef": 0.05,
     "vf_coef": 0.5,
     "max_grad_norm": 0.5,
 }
@@ -111,6 +111,7 @@ DEFAULT_DDPG_PARAMS: Dict[str, Any] = {
     "batch_size": 256,
     "tau": 0.005,
     "gamma": 0.99,
+    "action_noise": 0.3,
     "train_freq": (1, "episode"),
     "gradient_steps": -1,
 }
@@ -120,7 +121,7 @@ DEFAULT_A2C_PARAMS: Dict[str, Any] = {
     "n_steps": 5,
     "gamma": 0.99,
     "gae_lambda": 1.0,
-    "ent_coef": 0.0,
+    "ent_coef": 0.05,
     "vf_coef": 0.5,
     "max_grad_norm": 0.5,
 }

@@ -42,7 +42,8 @@ class PINNInferenceEngine:
         enable_validation: bool = True,
         cache_size: int = 1000,
         cache_ttl: int = 3600,  # Cache TTL in seconds (1 hour default)
-        verbose: bool = True
+        verbose: bool = True,
+        asset_name: Optional[str] = None
     ):
         """
         Initialize PINN inference engine.
@@ -56,9 +57,26 @@ class PINNInferenceEngine:
             cache_size: LRU cache maximum items (default: 1000)
             cache_ttl: Cache Time-To-Live in seconds (default: 3600=1 hour)
             verbose: Print logging info
+            asset_name: Optional asset identifier to load specialist weights
         """
-        self.checkpoint_path = checkpoint_path
-        self.data_stats_path = data_stats_path
+        self.asset_name = asset_name
+        
+        if asset_name:
+            # Route to specialist subfolder
+            base_dir = Path(__file__).parent / "weights" / asset_name[:4].upper()
+            self.checkpoint_path = str(base_dir / "best_model_weights.pth")
+            
+            # Fallback for old naming
+            if not os.path.exists(self.checkpoint_path):
+                self.checkpoint_path = str(base_dir / "best_hybrid_model.pth")
+                
+            self.data_stats_path = str(base_dir / "data_stats.json")
+            if verbose:
+                logger.info(f"Routing PINN to specialist directory for asset {asset_name}: {base_dir}")
+        else:
+            self.checkpoint_path = checkpoint_path
+            self.data_stats_path = data_stats_path
+            
         self.device = device
         self.dtype = torch.float32 if dtype == "float32" else torch.float64
         self.enable_validation = enable_validation
@@ -79,7 +97,7 @@ class PINNInferenceEngine:
             else:
                 self.model_loaded = False
         except FileNotFoundError:
-            logger.warning(f"⚠️  Checkpoint not found at {checkpoint_path}")
+            logger.warning(f"Checkpoint not found at {checkpoint_path}")
             logger.warning("   PINN model will be initialized with random weights on first training")
             self.model = None
             self.model_loaded = False
@@ -87,14 +105,14 @@ class PINNInferenceEngine:
             # Architecture mismatch - this is expected if checkpoint was trained with different config
             error_msg = str(e)
             if "size mismatch" in error_msg or "Unexpected key" in error_msg or "Missing key" in error_msg:
-                logger.warning(f"⚠️  Checkpoint architecture mismatch - will initialize fresh")
+                logger.warning(f"Checkpoint architecture mismatch - will initialize fresh")
                 logger.warning(f"   Reason: Model was trained with different configuration")
                 logger.warning(f"   Example: Different embedding_dim, hidden_size, or neuron counts")
                 logger.info(f"   This is normal. Model will learn from current training data.")
                 self.model = None
                 self.model_loaded = False
             else:
-                logger.error(f"❌ Unexpected error loading checkpoint: {e}")
+                logger.error(f"Unexpected error loading checkpoint: {e}")
                 self.model = None
                 self.model_loaded = False
         
@@ -103,7 +121,7 @@ class PINNInferenceEngine:
         self.cache_timestamps = {}  # Track creation time for TTL
         
         if verbose:
-            status = "✅" if self.model_loaded else "⚠️ "
+            status = "[OK]" if self.model_loaded else "[WARN]"
             model_status = "initialized" if self.model_loaded else "pending (will load on first training)"
             logger.info(f"{status} PINN InferenceEngine {model_status} on {device} (cache_size={cache_size}, TTL={cache_ttl}s)")
     
@@ -132,9 +150,9 @@ class PINNInferenceEngine:
             }
             
             if self.verbose:
-                logger.info(f"✅ Loaded data statistics from {self.data_stats_path}")
+                logger.info(f"Loaded data statistics from {self.data_stats_path}")
         except Exception as e:
-            logger.error(f"❌ Failed to load data stats: {e}")
+            logger.error(f"Failed to load data stats: {e}")
             raise
     
     def _load_checkpoint(self) -> nn.Module:
@@ -148,7 +166,7 @@ class PINNInferenceEngine:
             
             # Check if checkpoint exists
             if not os.path.exists(self.checkpoint_path):
-                logger.info(f"ℹ️  Checkpoint not found - model will be trained from scratch")
+                logger.info(f"Checkpoint not found - model will be trained from scratch")
                 return None
             
             # Load checkpoint state dict
@@ -158,9 +176,9 @@ class PINNInferenceEngine:
             try:
                 from .config import MODEL_CONFIG
                 model_config = MODEL_CONFIG
-                logger.info(f"ℹ️  Using explicit configuration from src/pinn/config.py for model initialization")
+                logger.info(f"Using explicit configuration from src/pinn/config.py for model initialization")
             except ImportError:
-                logger.warning("⚠️ Could not import MODEL_CONFIG from .config, falling back to data_stats")
+                logger.warning("Could not import MODEL_CONFIG from .config, falling back to data_stats")
                 model_config = self.data_stats.get('config', {})
             
             if not model_config:
@@ -191,12 +209,12 @@ class PINNInferenceEngine:
             try:
                 model.load_state_dict(state_dict, strict=True)
                 if self.verbose:
-                    logger.info(f"✅ Loaded PINN checkpoint successfully")
+                    logger.info(f"Loaded PINN checkpoint successfully")
                 model.eval()
                 return model
             except RuntimeError as e:
                 error_msg = str(e)
-                logger.warning(f"⚠️  Checkpoint incompatible: {str(error_msg)[:100]}...")
+                logger.warning(f"Checkpoint incompatible: {str(error_msg)[:100]}...")
                 logger.info(f"   Model will be trained from scratch")
                 return None
         
@@ -315,7 +333,7 @@ class PINNInferenceEngine:
         
         # Check if model is loaded
         if not self.model_loaded or self.model is None:
-            logger.warning("⚠️ PINN model not loaded yet, returning default Heston parameters")
+            logger.warning("PINN model not loaded yet, returning default Heston parameters")
             batch_size = x_seq.shape[0]
             return {
                 'nu': np.ones((batch_size, 1)) * 0.25,      # Default variance
@@ -330,7 +348,7 @@ class PINNInferenceEngine:
         if self.enable_validation:
             is_valid, warnings = self.validate_inputs(x_seq, x_phy, asset_ids)
             for w in warnings:
-                logger.warning(f"⚠️ PINN validation: {w}")
+                logger.warning(f"PINN validation: {w}")
         
         # Preprocess
         x_seq_norm, x_phy_norm = self.preprocess_inputs(x_seq, x_phy)
@@ -350,15 +368,18 @@ class PINNInferenceEngine:
                     price = outputs[0]
                     heston_params = outputs[1:]
                 else:
-                    # If model returns dict
+                    # If model returns dict (updated format)
                     price = outputs.get('price', torch.zeros(x_seq.shape[0], 1))
-                    heston_params = [
-                        outputs.get(f'param_{i}', torch.zeros(x_seq.shape[0], 1))
-                        for i in range(5)
-                    ]
+                    heston_params = outputs.get('heston_params')
+                    if heston_params is None:
+                         # Fallback for old dict format
+                         heston_params = [
+                            outputs.get(f'param_{i}', torch.zeros(x_seq.shape[0], 1))
+                            for i in range(5)
+                        ]
                 
             except Exception as e:
-                logger.error(f"❌ PINN inference failed: {e}")
+                logger.error(f"PINN inference failed: {e}")
                 # Return dummy features
                 batch_size = x_seq.shape[0]
                 price = torch.zeros(batch_size, 1, device=self.device)
@@ -420,7 +441,7 @@ class PINNInferenceEngine:
         self.inference_cache.clear()
         self.cache_timestamps.clear()
         if self.verbose:
-            logger.info("✅ Cleared PINN inference cache")
+            logger.info("Cleared PINN inference cache")
     
     def _cache_get(self, key: str) -> Optional[Any]:
         """

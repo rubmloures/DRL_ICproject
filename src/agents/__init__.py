@@ -22,6 +22,7 @@ from .base_agent import BaseDRLAgent
 from .drl_agents import PPOAgent, DDPGAgent, A2CAgent
 from .ensemble_agent import EnsembleAgent
 from .models import PPOPINNAgent
+from .coordinator import PortfolioCoordinator
 
 __all__ = [
     "BaseDRLAgent",

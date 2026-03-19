@@ -52,7 +52,7 @@ def _physical_scaling_factors(V: Tensor, S: Tensor, tau: Tensor) -> tuple:
     
     return price_scale, time_scale, spot_scale
 
-def physics_regularization(model_output: dict, x_phy: Tensor) -> Tensor:
+def physics_regularization(model_output: dict, x_phy: Tensor, lambda_feller: float = 1.0) -> Tensor:
     """
     Regularização para evitar colapso dos parâmetros físicos.
     Baseado em Wang et al. (2020) - "Understanding and Mitigating Gradient Flow Pathologies"
@@ -84,7 +84,16 @@ def physics_regularization(model_output: dict, x_phy: Tensor) -> Tensor:
     # ρ (correlação) ∈ [-0.99, 0.99]
     reg_rho = torch.mean(torch.relu(-0.99 - rho) + torch.relu(rho - 0.99))
     
-    return reg_nu + reg_theta + reg_kappa + reg_xi + reg_rho
+    # 2. Feller Condition Penalty: 2*kappa*theta > xi^2
+    # We want (xi^2 - 2*kappa*theta) to be negative. 
+    # If positive, we penalize.
+    feller_violation = (xi ** 2) - (2 * kappa * theta)
+    reg_feller = torch.mean(torch.relu(feller_violation + 1e-4)) # +epsilon margin
+    
+    total_reg = reg_nu + reg_theta + reg_kappa + reg_xi + \
+                (lambda_feller * reg_feller) 
+                
+    return total_reg
 
 def heston_boundary_conditions(model_output: dict, x_phy: Tensor, 
                                 data_stats: dict) -> Tensor:
@@ -118,14 +127,14 @@ def heston_boundary_conditions(model_output: dict, x_phy: Tensor,
     # === Condição 2: S → ∞ (usando moneyness) ===
     moneyness = S / (K + 1e-8)
     mask_large_S = (moneyness > 2.0).float()
-    # CORRECTED: V está normalizado (P/K), então comparar com (S-K)/K
+    # V está normalizado (P/K), então comparar com (S-K)/K
     intrinsic_value_norm = (S - K) / (K + 1e-8)
     bc_large_S = torch.mean(mask_large_S * (V - intrinsic_value_norm) ** 2)
     
     # === Condição 3: τ → 0 ===
     tau_threshold = 0.01 * data_stats['T_max']
     mask_small_tau = (T < tau_threshold).float()
-    # CORRECTED: Payoff normalizado max((S-K)/K, 0)
+    # Payoff normalizado max((S-K)/K, 0)
     payoff_norm = torch.relu((S - K) / (K + 1e-8))
     bc_small_tau = torch.mean(mask_small_tau * (V - payoff_norm) ** 2)
     

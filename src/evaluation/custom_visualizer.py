@@ -1,51 +1,42 @@
-"""
-Custom DRL Visualization Module
-
-Generates DRL-specific plots:
-1. Buy/Sell actions overlaid on price charts
-2. Return distributions and tail metrics
-3. CDI comparison and outperformance
-4. Regime switching visualization (for PINN-based agents)
-5. Portfolio composition over time
-"""
-
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
 import numpy as np
 import pandas as pd
-
-try:
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
-except ImportError:
-    plt = None
-    mpatches = None
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+from scipy import stats
 
 logger = logging.getLogger(__name__)
 
 
 class CustomVisualizer:
     """
-    Custom visualizations for DRL trading agents.
+    Custom visualizations for DRL trading agents using Plotly.
     """
     
-    def __init__(self, save_dir: str = "./visualizations", dpi: int = 100):
+    def __init__(self, save_dir: str = "./visualizations"):
         """
         Initialize visualizer.
         
         Args:
             save_dir: Directory to save visualizations
-            dpi: Resolution for saved figures
         """
-        if plt is None:
-            raise ImportError("matplotlib required. Install: pip install matplotlib")
-        
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
-        self.dpi = dpi
         
+    def _save_or_show(self, fig: go.Figure, save_as: Optional[str] = None) -> None:
+        """Helper to save as HTML or show."""
+        if save_as:
+            save_path = self.save_dir / save_as
+            if not str(save_path).endswith('.html'):
+                save_path = save_path.with_suffix('.html')
+            fig.write_html(str(save_path))
+            logger.info(f"Saved plot to {save_path}")
+        else:
+            fig.show()
+
     def plot_trading_actions(
         self,
         prices: pd.Series,
@@ -55,101 +46,43 @@ class CustomVisualizer:
         figsize: Tuple[int, int] = (16, 8),
         save_as: Optional[str] = None,
     ) -> None:
-        """
-        Plot buy/sell actions overlaid on price chart.
+        """Plot buy/sell actions overlaid on price chart using Plotly."""
         
-        Args:
-            prices: Series of asset prices indexed by date
-            actions: Series of actions (1=buy, -1=sell, 0=hold) indexed by date
-            account_values: Optional account value series
-            title: Plot title
-            figsize: Figure size
-            save_as: Filename to save (without save_dir)
-        """
-        fig, axes = plt.subplots(
-            2 if account_values is not None else 1,
-            1,
-            figsize=figsize,
-            sharex=True,
-        )
-        
-        if account_values is None:
-            ax_price = axes
-            ax_value = None
-        else:
-            ax_price, ax_value = axes
+        has_account = account_values is not None
+        fig = make_subplots(rows=2 if has_account else 1, cols=1, 
+                           shared_xaxes=True, 
+                           vertical_spacing=0.05,
+                           subplot_titles=(title, "Account Value") if has_account else (title,))
         
         # Plot prices
-        ax_price.plot(prices.index, prices.values, label='Asset Price', color='black', linewidth=2)
-        ax_price.set_ylabel('Price', fontsize=12)
-        ax_price.set_title(title, fontsize=14, fontweight='bold')
-        ax_price.grid(True, alpha=0.3)
+        fig.add_trace(go.Scatter(x=prices.index, y=prices.values, name='Price', line=dict(color='black', width=2)), row=1, col=1)
         
-        # Plot buy signals (triangles pointing up)
+        # Actions
         buys = actions[actions > 0.5]
         if len(buys) > 0:
-            buy_prices = prices.loc[buys.index]
-            ax_price.scatter(
-                buys.index,
-                buy_prices.values,
-                marker='^',
-                color='green',
-                s=200,
-                label='Buy',
-                zorder=5,
-                edgecolors='darkgreen',
-                linewidth=1.5,
-            )
-        
-        # Plot sell signals (triangles pointing down)
+            fig.add_trace(go.Scatter(
+                x=buys.index, y=prices.loc[buys.index],
+                mode='markers', name='Buy',
+                marker=dict(symbol='triangle-up', size=15, color='green', line=dict(width=1, color='darkgreen'))
+            ), row=1, col=1)
+            
         sells = actions[actions < -0.5]
         if len(sells) > 0:
-            sell_prices = prices.loc[sells.index]
-            ax_price.scatter(
-                sells.index,
-                sell_prices.values,
-                marker='v',
-                color='red',
-                s=200,
-                label='Sell',
-                zorder=5,
-                edgecolors='darkred',
-                linewidth=1.5,
-            )
-        
-        ax_price.legend(loc='upper left', fontsize=11)
-        
-        # Plot account value if available
-        if ax_value is not None and account_values is not None:
-            ax_value.plot(
-                account_values.index,
-                account_values.values,
-                label='Account Value',
-                color='blue',
-                linewidth=2,
-            )
-            ax_value.set_ylabel('Account Value ($)', fontsize=12)
-            ax_value.set_xlabel('Date', fontsize=12)
-            ax_value.grid(True, alpha=0.3)
-            ax_value.legend(loc='upper left', fontsize=11)
+            fig.add_trace(go.Scatter(
+                x=sells.index, y=prices.loc[sells.index],
+                mode='markers', name='Sell',
+                marker=dict(symbol='triangle-down', size=15, color='red', line=dict(width=1, color='darkred'))
+            ), row=1, col=1)
             
-            # Format y-axis as currency
-            ax_value.yaxis.set_major_formatter(
-                plt.FuncFormatter(lambda x, p: f'${x:,.0f}')
-            )
-        else:
-            ax_price.set_xlabel('Date', fontsize=12)
+        # Account Value
+        if has_account:
+            fig.add_trace(go.Scatter(x=account_values.index, y=account_values.values, name='Account Value', line=dict(color='blue', width=2)), row=2, col=1)
+            fig.update_yaxes(title_text="Value ($)", row=2, col=1, tickformat="$,.0f")
+            
+        fig.update_layout(template="plotly_white", height=800 if has_account else 500, hovermode="x unified")
+        fig.update_yaxes(title_text="Price", row=1, col=1)
         
-        plt.tight_layout()
-        
-        if save_as:
-            save_path = self.save_dir / save_as
-            plt.savefig(save_path, dpi=self.dpi, bbox_inches='tight')
-            logger.info(f"Saved trading actions plot to {save_path}")
-        else:
-            plt.show()
-        
-        plt.close()
+        self._save_or_show(fig, save_as)
     
     def plot_returns_distribution(
         self,
@@ -159,49 +92,34 @@ class CustomVisualizer:
         figsize: Tuple[int, int] = (14, 6),
         save_as: Optional[str] = None,
     ) -> None:
-        """
-        Plot return distributions with tail metrics.
-        
-        Args:
-            agent_returns: Series of agent returns
-            benchmark_returns: Optional benchmark returns for comparison
-            bins: Number of histogram bins
-            figsize: Figure size
-            save_as: Filename to save
-        """
-        fig, axes = plt.subplots(1, 2, figsize=figsize)
+        """Plot return distributions with tail metrics using Plotly."""
+        fig = make_subplots(rows=1, cols=2, subplot_titles=("Return Distribution", "Q-Q Plot"))
         
         # Histogram
-        ax = axes[0]
-        ax.hist(agent_returns.dropna(), bins=bins, alpha=0.7, color='blue', edgecolor='black', label='Agent')
+        fig.add_trace(go.Histogram(x=agent_returns.dropna(), nbinsx=bins, name='Agent', marker_color='blue', opacity=0.7), row=1, col=1)
         if benchmark_returns is not None:
-            ax.hist(benchmark_returns.dropna(), bins=bins, alpha=0.5, color='orange', edgecolor='black', label='Benchmark')
+            fig.add_trace(go.Histogram(x=benchmark_returns.dropna(), nbinsx=bins, name='Benchmark', marker_color='orange', opacity=0.5), row=1, col=1)
+            
+        fig.add_vline(x=agent_returns.mean(), line_dash="dash", line_color="blue", annotation_text=f"Mean: {agent_returns.mean():.2%}", row=1, col=1)
+        fig.add_vline(x=0, line_color="black", line_width=1, row=1, col=1)
         
-        ax.axvline(agent_returns.mean(), color='blue', linestyle='--', linewidth=2, label=f'Agent Mean: {agent_returns.mean():.2%}')
-        ax.axvline(0, color='black', linestyle='-', linewidth=1, alpha=0.5)
-        ax.set_xlabel('Daily Return', fontsize=12)
-        ax.set_ylabel('Frequency', fontsize=12)
-        ax.set_title('Return Distribution', fontsize=13, fontweight='bold')
-        ax.legend(fontsize=10)
-        ax.grid(True, alpha=0.3)
+        # Q-Q Plot approximation in Plotly
+        sorted_returns = np.sort(agent_returns.dropna())
+        norm_quantiles = stats.norm.ppf(np.linspace(0.01, 0.99, len(sorted_returns)))
         
-        # Q-Q plot (Normal distribution)
-        ax = axes[1]
-        from scipy import stats
-        stats.probplot(agent_returns.dropna(), dist="norm", plot=ax)
-        ax.set_title('Q-Q Plot (vs. Normal Distribution)', fontsize=13, fontweight='bold')
-        ax.grid(True, alpha=0.3)
+        fig.add_trace(go.Scatter(x=norm_quantiles, y=sorted_returns, mode='markers', name='Q-Q', marker=dict(color='blue', size=4)), row=1, col=2)
+        # Identity line for Q-Q
+        line_x = np.linspace(norm_quantiles.min(), norm_quantiles.max(), 100)
+        # Linear regression for fit line
+        slope, intercept, _, _, _ = stats.linregress(norm_quantiles, sorted_returns)
+        fig.add_trace(go.Scatter(x=line_x, y=intercept + slope*line_x, mode='lines', name='Fit', line=dict(color='red', dash='dash')), row=1, col=2)
         
-        plt.tight_layout()
+        fig.update_layout(template="plotly_white", title_text="<b>Return Analysis</b>")
+        fig.update_xaxes(title_text="Daily Return", row=1, col=1)
+        fig.update_xaxes(title_text="Theoretical Quantiles", row=1, col=2)
+        fig.update_yaxes(title_text="Sample Quantiles", row=1, col=2)
         
-        if save_as:
-            save_path = self.save_dir / save_as
-            plt.savefig(save_path, dpi=self.dpi, bbox_inches='tight')
-            logger.info(f"Saved returns distribution plot to {save_path}")
-        else:
-            plt.show()
-        
-        plt.close()
+        self._save_or_show(fig, save_as)
     
     def plot_cumulative_returns(
         self,
@@ -212,70 +130,29 @@ class CustomVisualizer:
         figsize: Tuple[int, int] = (14, 7),
         save_as: Optional[str] = None,
     ) -> None:
-        """
-        Plot cumulative returns with benchmarks.
+        """Plot cumulative returns with benchmarks using Plotly."""
+        fig = go.Figure()
         
-        Args:
-            agent_returns: Agent returns series
-            benchmark_returns: Ibovespa returns (optional)
-            cdi_returns: CDI/risk-free returns (optional)
-            log_scale: Use log scale for y-axis
-            figsize: Figure size
-            save_as: Filename to save
-        """
-        fig, ax = plt.subplots(figsize=figsize)
-        
-        # Calculate cumulative returns
-        agent_cumulative = (1 + agent_returns).cumprod()
-        ax.plot(
-            agent_cumulative.index,
-            agent_cumulative.values,
-            label='Agent',
-            linewidth=2.5,
-            color='blue',
-        )
-        
+        def add_cum_trace(returns, name, color, dash=None):
+            cum = (1 + returns).cumprod()
+            fig.add_trace(go.Scatter(x=cum.index, y=cum.values, name=name, line=dict(color=color, width=2.5, dash=dash)))
+            
+        add_cum_trace(agent_returns, "Agent", "blue")
         if benchmark_returns is not None:
-            benchmark_cumulative = (1 + benchmark_returns).cumprod()
-            ax.plot(
-                benchmark_cumulative.index,
-                benchmark_cumulative.values,
-                label='Ibovespa',
-                linewidth=2.5,
-                color='orange',
-                linestyle='--',
-            )
-        
+            add_cum_trace(benchmark_returns, "Ibovespa", "orange", "dash")
         if cdi_returns is not None:
-            cdi_cumulative = (1 + cdi_returns).cumprod()
-            ax.plot(
-                cdi_cumulative.index,
-                cdi_cumulative.values,
-                label='CDI (Risk-Free)',
-                linewidth=2.5,
-                color='green',
-                linestyle=':',
-            )
+            add_cum_trace(cdi_returns, "CDI", "green", "dot")
+            
+        fig.update_layout(
+            template="plotly_white",
+            title_text="<b>Cumulative Returns Comparison</b>",
+            yaxis_type="log" if log_scale else "linear",
+            hovermode="x unified"
+        )
+        fig.update_yaxes(title_text="Cumulative Return" + (" (Log Scale)" if log_scale else ""))
+        fig.update_xaxes(title_text="Date")
         
-        ax.set_ylabel('Cumulative Return (Log Scale)' if log_scale else 'Cumulative Return', fontsize=12)
-        ax.set_xlabel('Date', fontsize=12)
-        ax.set_title('Cumulative Returns Comparison', fontsize=14, fontweight='bold')
-        ax.legend(fontsize=11, loc='upper left')
-        ax.grid(True, alpha=0.3)
-        
-        if log_scale:
-            ax.set_yscale('log')
-        
-        plt.tight_layout()
-        
-        if save_as:
-            save_path = self.save_dir / save_as
-            plt.savefig(save_path, dpi=self.dpi, bbox_inches='tight')
-            logger.info(f"Saved cumulative returns plot to {save_path}")
-        else:
-            plt.show()
-        
-        plt.close()
+        self._save_or_show(fig, save_as)
     
     def plot_drawdown(
         self,
@@ -284,63 +161,35 @@ class CustomVisualizer:
         figsize: Tuple[int, int] = (14, 7),
         save_as: Optional[str] = None,
     ) -> None:
-        """
-        Plot drawdown (underwater plot).
-        
-        Args:
-            returns: Series of returns
-            title: Plot title
-            figsize: Figure size
-            save_as: Filename to save
-        """
-        fig, ax = plt.subplots(figsize=figsize)
-        
-        # Calculate cumulative returns and running maximum
+        """Plot drawdown using Plotly."""
         cumulative = (1 + returns).cumprod()
         running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max * 100  # % format
+        drawdown = (cumulative - running_max) / running_max * 100
         
-        # Plot drawdown as filled area
-        ax.fill_between(
-            drawdown.index,
-            drawdown.values,
-            0,
-            alpha=0.6,
-            color='red',
-            label='Drawdown',
-        )
-        ax.plot(drawdown.index, drawdown.values, color='darkred', linewidth=1)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=drawdown.index, y=drawdown.values,
+            fill='tozeroy', name='Drawdown',
+            line=dict(color='darkred', width=1),
+            fillcolor='rgba(255, 0, 0, 0.3)'
+        ))
         
-        ax.set_ylabel('Drawdown (%)', fontsize=12)
-        ax.set_xlabel('Date', fontsize=12)
-        ax.set_title(title, fontsize=14, fontweight='bold')
-        ax.grid(True, alpha=0.3, axis='y')
-        ax.legend(fontsize=11)
-        
-        # Highlight worst drawdown
+        # Highlight worst
         worst_idx = drawdown.idxmin()
-        worst_value = drawdown.min()
-        ax.scatter([worst_idx], [worst_value], color='darkred', s=100, zorder=5)
-        ax.annotate(
-            f'Max Drawdown: {worst_value:.1f}%',
-            xy=(worst_idx, worst_value),
-            xytext=(10, 10),
-            textcoords='offset points',
-            fontsize=10,
-            bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.7),
-            arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'),
-        )
+        worst_val = drawdown.min()
+        fig.add_trace(go.Scatter(
+            x=[worst_idx], y=[worst_val],
+            mode='markers+text',
+            text=[f"Max Drawdown: {worst_val:.1f}%"],
+            textposition="bottom center",
+            marker=dict(color='black', size=10),
+            showlegend=False
+        ))
         
-        plt.tight_layout()
+        fig.update_layout(template="plotly_white", title_text=f"<b>{title}</b>")
+        fig.update_yaxes(title_text="Drawdown (%)")
         
-        if save_as:
-            save_path = self.save_dir / save_as
-            plt.savefig(save_path, dpi=self.dpi, bbox_inches='tight')
-            logger.info(f"Saved drawdown plot to {save_path}")
-        else:
-            plt.show()
-        
-        plt.close()
+        self._save_or_show(fig, save_as)
     
     def plot_rolling_metrics(
         self,
@@ -350,68 +199,38 @@ class CustomVisualizer:
         figsize: Tuple[int, int] = (14, 10),
         save_as: Optional[str] = None,
     ) -> None:
-        """
-        Plot rolling performance metrics.
-        
-        Args:
-            returns: Series of returns
-            window: Rolling window size (in trading days)
-            metrics_list: List of metrics to plot ('sharpe', 'sortino', 'volatility')
-            figsize: Figure size
-            save_as: Filename to save
-        """
+        """Plot rolling performance metrics using Plotly."""
         if metrics_list is None:
             metrics_list = ['sharpe', 'sortino', 'volatility']
-        
-        num_metrics = len(metrics_list)
-        fig, axes = plt.subplots(num_metrics, 1, figsize=figsize, sharex=True)
-        
-        if num_metrics == 1:
-            axes = [axes]
-        
-        # Calculate rolling metrics
-        for idx, metric in enumerate(metrics_list):
-            ax = axes[idx]
             
+        fig = make_subplots(rows=len(metrics_list), cols=1, shared_xaxes=True, vertical_spacing=0.05)
+        
+        for idx, metric in enumerate(metrics_list):
+            row = idx + 1
             if metric == 'sharpe':
                 rolling_mean = returns.rolling(window).mean() * 252
                 rolling_std = returns.rolling(window).std() * np.sqrt(252)
-                rolling_metric = rolling_mean / rolling_std
-                label = 'Rolling Sharpe Ratio'
-                ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
-                
+                val = rolling_mean / rolling_std
+                name = 'Rolling Sharpe'
+                color = 'blue'
+                fig.add_hline(y=0, line_color="black", row=row, col=1)
             elif metric == 'sortino':
                 rolling_mean = returns.rolling(window).mean() * 252
                 downside = returns[returns < 0].rolling(window).std() * np.sqrt(252)
-                rolling_metric = rolling_mean / downside
-                label = 'Rolling Sortino Ratio'
-                ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
-                
+                val = rolling_mean / downside
+                name = 'Rolling Sortino'
+                color = 'green'
+                fig.add_hline(y=0, line_color="black", row=row, col=1)
             elif metric == 'volatility':
-                rolling_metric = returns.rolling(window).std() * np.sqrt(252) * 100
-                label = 'Rolling Volatility (%)'
+                val = returns.rolling(window).std() * np.sqrt(252) * 100
+                name = 'Rolling Volatility (%)'
+                color = 'red'
                 
-            else:
-                continue
+            fig.add_trace(go.Scatter(x=val.index, y=val.values, fill='tozeroy', name=name, line=dict(color=color)), row=row, col=1)
+            fig.update_yaxes(title_text=name, row=row, col=1)
             
-            ax.plot(rolling_metric.index, rolling_metric.values, linewidth=2, color='blue')
-            ax.fill_between(rolling_metric.index, rolling_metric.values, alpha=0.3, color='blue')
-            
-            ax.set_ylabel(label, fontsize=11)
-            ax.grid(True, alpha=0.3)
-            ax.set_title(f'{label} (Window={window} days)', fontsize=12, fontweight='bold')
-        
-        axes[-1].set_xlabel('Date', fontsize=12)
-        plt.tight_layout()
-        
-        if save_as:
-            save_path = self.save_dir / save_as
-            plt.savefig(save_path, dpi=self.dpi, bbox_inches='tight')
-            logger.info(f"Saved rolling metrics plot to {save_path}")
-        else:
-            plt.show()
-        
-        plt.close()
+        fig.update_layout(template="plotly_white", height=300 * len(metrics_list), title_text=f"<b>Rolling Metrics (Window={window})</b>")
+        self._save_or_show(fig, save_as)
     
     def plot_regime_switching(
         self,
@@ -421,16 +240,7 @@ class CustomVisualizer:
         figsize: Tuple[int, int] = (14, 8),
         save_as: Optional[str] = None,
     ) -> None:
-        """
-        Plot regime switching for PINN-based agents.
-        
-        Args:
-            returns: Series of returns
-            regimes: Series of regime labels
-            regime_colors: Dictionary mapping regime names to colors
-            figsize: Figure size
-            save_as: Filename to save
-        """
+        """Plot regime switching using Plotly."""
         if regime_colors is None:
             regime_colors = {
                 'stable_trending': 'green',
@@ -438,70 +248,37 @@ class CustomVisualizer:
                 'elevated_volatility': 'orange',
                 'turbulent_shock': 'red',
             }
-        
-        fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
-        
-        # Plot returns with regime background
-        ax = axes[0]
-        ax.plot(returns.index, returns.values * 100, label='Daily Returns', color='black', linewidth=1)
-        ax.set_ylabel('Daily Return (%)', fontsize=12)
-        ax.set_title('Returns with Detected Regimes', fontsize=14, fontweight='bold')
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=10)
-        
-        # Color background by regime
-        unique_regimes = regimes.unique()
-        for regime in unique_regimes:
-            mask = regimes == regime
-            regime_periods = returns[mask].index
             
-            if len(regime_periods) > 0:
-                color = regime_colors.get(regime, 'gray')
-                ax.axvspan(
-                    regime_periods[0],
-                    regime_periods[-1],
-                    alpha=0.2,
-                    color=color,
-                    label=regime if regime in unique_regimes[:1] else '',
-                )
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05)
         
-        # Plot cumulative returns with regime shading
-        cumulative = (1 + returns).cumprod()
-        ax = axes[1]
-        ax.plot(cumulative.index, cumulative.values, label='Cumulative Return', color='blue', linewidth=2)
-        ax.set_ylabel('Cumulative Return', fontsize=12)
-        ax.set_xlabel('Date', fontsize=12)
-        ax.set_title('Cumulative Returns with Regime Indicators', fontsize=14, fontweight='bold')
-        ax.grid(True, alpha=0.3)
+        # Returns
+        fig.add_trace(go.Scatter(x=returns.index, y=returns.values * 100, name='Returns', line=dict(color='black', width=1)), row=1, col=1)
         
-        # Color background by regime
-        for regime in unique_regimes:
-            mask = regimes == regime
-            color = regime_colors.get(regime, 'gray')
-            ax.axvspan(
-                returns[mask].index[0],
-                returns[mask].index[-1],
-                alpha=0.1,
-                color=color,
-            )
+        # Cumulative
+        cum = (1 + returns).cumprod()
+        fig.add_trace(go.Scatter(x=cum.index, y=cum.values, name='Cumulative', line=dict(color='blue', width=2)), row=2, col=1)
         
-        # Create legend for regimes
-        legend_elements = [
-            mpatches.Patch(facecolor=regime_colors.get(r, 'gray'), alpha=0.3, label=r)
-            for r in unique_regimes
-        ]
-        ax.legend(handles=legend_elements, loc='upper left', fontsize=10)
+        # Add regime shapes (vrect)
+        # To avoid too many traces, we iterate and find contiguous blocks
+        curr_regime = None
+        start_date = None
         
-        plt.tight_layout()
+        for date, regime in regimes.items():
+            if regime != curr_regime:
+                if curr_regime is not None:
+                    # Closing previous block
+                    fig.add_vrect(x0=start_date, x1=date, fillcolor=regime_colors.get(curr_regime, 'gray'), opacity=0.15, layer="below", line_width=0)
+                start_date = date
+                curr_regime = regime
+        # Last block
+        if curr_regime is not None:
+            fig.add_vrect(x0=start_date, x1=regimes.index[-1], fillcolor=regime_colors.get(curr_regime, 'gray'), opacity=0.15, layer="below", line_width=0)
+            
+        fig.update_layout(template="plotly_white", title_text="<b>Regime Switching Analysis</b>", height=700)
+        fig.update_yaxes(title_text="Daily Return (%)", row=1, col=1)
+        fig.update_yaxes(title_text="Cumulative Return", row=2, col=1)
         
-        if save_as:
-            save_path = self.save_dir / save_as
-            plt.savefig(save_path, dpi=self.dpi, bbox_inches='tight')
-            logger.info(f"Saved regime switching plot to {save_path}")
-        else:
-            plt.show()
-        
-        plt.close()
+        self._save_or_show(fig, save_as)
     
     def plot_performance_metrics_table(
         self,
@@ -509,70 +286,25 @@ class CustomVisualizer:
         figsize: Tuple[int, int] = (10, 6),
         save_as: Optional[str] = None,
     ) -> None:
-        """
-        Plot performance metrics as a formatted table.
+        """Plot metrics as a Plotly Table."""
         
-        Args:
-            metrics: Dictionary of metrics to display
-            figsize: Figure size
-            save_as: Filename to save
-        """
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.axis('off')
-        
-        # Format metrics for display
-        formatted_metrics = []
-        for key, value in sorted(metrics.items()):
-            # Replace underscores with spaces and capitalize
-            display_key = key.replace('_', ' ').title()
-            
-            # Format value based on type
-            if isinstance(value, float):
-                if 'ratio' in key.lower() or 'correlation' in key.lower():
-                    display_value = f"{value:.4f}"
-                elif 'rate' in key.lower() or 'return' in key.lower() or 'drawdown' in key.lower():
-                    display_value = f"{value:.2%}"
+        keys = []
+        values = []
+        for k, v in sorted(metrics.items()):
+            keys.append(f"<b>{k.replace('_', ' ').title()}</b>")
+            if isinstance(v, float):
+                if any(x in k.lower() for x in ['rate', 'return', 'drawdown']):
+                    values.append(f"{v:.2%}")
                 else:
-                    display_value = f"{value:.4f}"
+                    values.append(f"{v:.4f}")
             else:
-                display_value = str(value)
-            
-            formatted_metrics.append([display_key, display_value])
+                values.append(str(v))
+                
+        fig = go.Figure(data=[go.Table(
+            header=dict(values=['<b>Metric</b>', '<b>Value</b>'], fill_color='royalblue', align='left', font=dict(color='white', size=14)),
+            cells=dict(values=[keys, values], fill_color='#f0f2f6', align='left', font=dict(size=12))
+        )])
         
-        # Create table
-        table = ax.table(
-            cellText=formatted_metrics,
-            colLabels=['Metric', 'Value'],
-            cellLoc='left',
-            loc='center',
-            colWidths=[0.6, 0.4],
-        )
-        
-        table.auto_set_font_size(False)
-        table.set_fontsize(10)
-        table.scale(1, 2)
-        
-        # Style header
-        for i in range(2):
-            table[(0, i)].set_facecolor('#40466e')
-            table[(0, i)].set_text_props(weight='bold', color='white')
-        
-        # Alternate row colors
-        for i in range(1, len(formatted_metrics) + 1):
-            for j in range(2):
-                if i % 2 == 0:
-                    table[(i, j)].set_facecolor('#f0f0f0')
-                else:
-                    table[(i, j)].set_facecolor('white')
-        
-        plt.title('Performance Metrics Summary', fontsize=14, fontweight='bold', pad=20)
-        plt.tight_layout()
-        
-        if save_as:
-            save_path = self.save_dir / save_as
-            plt.savefig(save_path, dpi=self.dpi, bbox_inches='tight')
-            logger.info(f"Saved metrics table to {save_path}")
-        else:
-            plt.show()
-        
-        plt.close()
+        fig.update_layout(title="Performance Metrics Summary")
+        self._save_or_show(fig, save_as)
+

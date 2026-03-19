@@ -44,9 +44,9 @@ class PINNDataPreprocessor:
             with open(data_stats_path, 'r') as f:
                 self.data_stats = json.load(f)
             if self.verbose:
-                logger.info(f"✅ Loaded data stats from {data_stats_path}")
+                logger.info(f"Loaded data stats from {data_stats_path}")
         except Exception as e:
-            logger.warning(f"⚠️ Could not load data stats: {e}")
+            logger.warning(f"Could not load data stats: {e}")
     
     def load_raw_csv(
         self,
@@ -81,7 +81,7 @@ class PINNDataPreprocessor:
             
             # Handle any date parsing errors
             if df['date'].isna().any():
-                logger.warning(f"⚠️ Found {df['date'].isna().sum()} unparseable dates in {csv_path}")
+                logger.warning(f"Found {df['date'].isna().sum()} unparseable dates in {csv_path}")
                 df = df.dropna(subset=['date'])
             
             # Rename acao columns (stock OHLCV)
@@ -95,12 +95,12 @@ class PINNDataPreprocessor:
             df.rename(columns=rename_map, inplace=True)
             
             if self.verbose:
-                logger.info(f"✅ Loaded {len(df)} rows from {csv_path}")
+                logger.info(f"Loaded {len(df)} rows from {csv_path}")
             
             return df
         
         except Exception as e:
-            logger.error(f"❌ Error loading CSV {csv_path}: {e}")
+            logger.error(f"Error loading CSV {csv_path}: {e}")
             raise
     
     def merge_market_rates(
@@ -133,9 +133,9 @@ class PINNDataPreprocessor:
             selic_df = selic_df.sort_values('date')
             
             if self.verbose:
-                logger.info(f"✅ Loaded {len(selic_df)} taxa_selic records")
+                logger.info(f"Loaded {len(selic_df)} taxa_selic records")
         except Exception as e:
-            logger.error(f"❌ Error loading taxa_selic: {e}")
+            logger.error(f"Error loading taxa_selic: {e}")
             raise
         
         # Load dividend yields
@@ -150,9 +150,9 @@ class PINNDataPreprocessor:
             div_df['Dividend_Yield'] = pd.to_numeric(div_df['Dividend_Yield'], errors='coerce').fillna(0.0)
             
             if self.verbose:
-                logger.info(f"✅ Loaded {len(div_df)} dividend yield records")
+                logger.info(f"Loaded {len(div_df)} dividend yield records")
         except Exception as e:
-            logger.error(f"❌ Error loading dividend_yields: {e}")
+            logger.error(f"Error loading dividend_yields: {e}")
             raise
         
         # Merge taxa Selic (one rate per date for all assets)
@@ -173,7 +173,7 @@ class PINNDataPreprocessor:
         df['r_rate'] = df['r_rate'].bfill()
         
         if self.verbose:
-            logger.info(f"✅ Merged taxa_selic and dividend_yields")
+            logger.info(f"Merged taxa_selic and dividend_yields")
         
         return df
     
@@ -198,17 +198,61 @@ class PINNDataPreprocessor:
         
         df = df.sort_values('date').reset_index(drop=True)
         
-        # Calculate features
-        df['log_returns'] = np.log(df['close'] / df['close'].shift(1))
-        df['rolling_vol_20'] = df['log_returns'].rolling(window_size).std()
-        df['log_volume'] = np.log(df['volume'] + 1e-8)
+        # Calculate features (Aligned with src/pinn/data_loader.py)
+        df['log_ret'] = np.log(df['close'] / df['close'].shift(1)).fillna(0.0)
+        df['rolling_vol_20'] = df['log_ret'].rolling(window=20).std().fillna(0.0)
+        df['ewma_vol'] = df['log_ret'].ewm(span=20, adjust=False).std().fillna(0.0)
         
-        # If not in dataframe, use placeholder
-        if 'ewma_vol' not in df.columns:
-            df['ewma_vol'] = df['log_returns'].ewm(span=20).std()
-        
-        if 'vol_parkinson' not in df.columns:
-            df['vol_parkinson'] = np.sqrt(np.log(df['high'] / df['low'])**2 / (4 * np.log(2)))
+        # Log Volume Financeiro (ACAO_VOL_FIN)
+        # Handle different potential column names for volume
+        vol_col = next((c for c in ['volume', 'acao_vol_fin'] if c in df.columns), None)
+        if vol_col:
+            df['log_vol_fin'] = np.log(pd.to_numeric(df[vol_col], errors='coerce') + 1.0).fillna(0.0)
+        else:
+            df['log_vol_fin'] = 0.0
+            
+        # Volatilidade de Parkinson
+        if 'high' in df.columns and 'low' in df.columns:
+            h, l = pd.to_numeric(df['high'], errors='coerce'), pd.to_numeric(df['low'], errors='coerce')
+            df['vol_parkinson'] = np.sqrt((1/(4*np.log(2))) * (np.log(h/(l+1e-8))**2)).fillna(0.0)
+        else:
+            df['vol_parkinson'] = 0.0
+
+        # Log-retornos do IBOV (Contexto de mercado)
+        # Try to load IBOV context if available in the same directory or via PATHS
+        df['log_ret_ibov'] = 0.0
+        try:
+            from config.config import DATA_RAW
+            ibov_path = DATA_RAW / "BOVA11.csv"
+            if ibov_path.exists():
+                    # Simple load to get returns
+                    ibov_df = pd.read_csv(ibov_path, sep=';', decimal=',', skiprows=1)
+                    ibov_date_col = next((c for c in ['time', 'date', 'data'] if c in ibov_df.columns), None)
+                    ibov_close_col = next((c for c in ['acao_close_ajustado', 'close'] if c in ibov_df.columns), None)
+                    if ibov_date_col and ibov_close_col:
+                        ibov_df[ibov_date_col] = pd.to_datetime(ibov_df[ibov_date_col], errors='coerce')
+                        
+                        # --- FIX: Aggregate IBOV to daily basis to prevent merge explosion ---
+                        ibov_df['date_norm'] = ibov_df[ibov_date_col].dt.normalize()
+                        # Take the last close of each day
+                        ibov_daily = ibov_df.sort_values(ibov_date_col).groupby('date_norm').agg({
+                            ibov_close_col: 'last'
+                        }).reset_index()
+                        
+                        # Calculate daily log returns for IBOV
+                        ibov_daily['log_ret_ibov_real'] = np.log(
+                            ibov_daily[ibov_close_col] / ibov_daily[ibov_close_col].shift(1)
+                        ).fillna(0.0)
+                        
+                        # Merge on normalized date
+                        df['temp_date'] = df['date'].dt.normalize()
+                        df = pd.merge(df, ibov_daily[['date_norm', 'log_ret_ibov_real']], 
+                                     left_on='temp_date', right_on='date_norm', how='left')
+                        df['log_ret_ibov'] = df['log_ret_ibov_real'].fillna(0.0)
+                        # Clean up temp columns
+                        df = df.drop(columns=['temp_date', 'date_norm', 'log_ret_ibov_real'])
+        except Exception as e:
+            logger.debug(f"Could not load IBOV context for PINN: {e}")
         
         x_seq_list = []
         x_phy_list = []
@@ -221,12 +265,12 @@ class PINNDataPreprocessor:
             
             # Build x_seq [window_size, 6]
             seq = np.column_stack([
-                window['log_returns'].values,
+                window['log_ret'].values,
                 window['rolling_vol_20'].values,
                 window['ewma_vol'].values,
                 window['vol_parkinson'].values,
-                window['log_volume'].values,
-                np.zeros(window_size)  # Placeholder for IBOV returns
+                window['log_vol_fin'].values,
+                window['log_ret_ibov'].values
             ]).astype(np.float32)
             
             # Build x_phy [5] = [S, K, T, r, q]
@@ -284,7 +328,7 @@ class PINNDataPreprocessor:
         
         if self.verbose:
             logger.info(
-                f"✅ Filtered {len(df)} → {len(filtered)} options "
+                f"Filtered {len(df)} -> {len(filtered)} options "
                 f"(moneyness [{min_moneyness}, {max_moneyness}], type={option_type})"
             )
         
@@ -329,6 +373,6 @@ class PINNDataPreprocessor:
             raise ValueError(f"Unknown normalization method: {method}")
         
         if self.verbose:
-            logger.info(f"✅ Normalized features using {method}")
+            logger.info(f"Normalized features using {method}")
         
         return x_seq_norm.astype(np.float32), x_phy_norm.astype(np.float32), stats

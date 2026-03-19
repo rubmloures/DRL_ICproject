@@ -13,15 +13,15 @@ from src.agents.transformer_extractor import TransformerFeatureExtractor
 PPO_PARAMS: Dict[str, Any] = {
     "learning_rate": 3e-4,
     "n_steps": 2048,
-    "batch_size": 64,
+    "batch_size": 128,  # Must be a factor of n_steps (2048)
     "n_epochs": 10,
     "gamma": 0.99,
     "gae_lambda": 0.95,
     "clip_range": 0.2,
     "ent_coef": 0.05,
     "vf_coef": 0.5,
-    "max_grad_norm": 0.5,
-    "verbose": 1,
+    "max_grad_norm": 1.0, # Increased for robustness
+    "verbose": 0,
     "policy_kwargs": {
         "features_extractor_class": TransformerFeatureExtractor,
         "features_extractor_kwargs": {
@@ -38,14 +38,14 @@ PPO_PARAMS: Dict[str, Any] = {
 # DDPG Agent Hyperparameters
 # =============================================================================
 DDPG_PARAMS: Dict[str, Any] = {
-    "learning_rate": 1e-3,
+    "learning_rate": 3e-4, # Lowered from 1e-3 for stability
     "buffer_size": 100_000,
     "learning_starts": 1_000,
-    "batch_size": 64,
+    "batch_size": 128,   # Lowered from 4096 to avoid massive gradient steps
     "gamma": 0.99,
-    "tau": 0.001,
-    "action_noise": 0.2,
-    "verbose": 1,
+    "tau": 0.005,        # Slightly faster target update
+    "action_noise": 0.3, # Increased from 0.1 to prevent stagnation/zero weights
+    "verbose": 0,
     "policy_kwargs": {
         "features_extractor_class": TransformerFeatureExtractor,
         "features_extractor_kwargs": {
@@ -61,14 +61,14 @@ DDPG_PARAMS: Dict[str, Any] = {
 # A2C Agent Hyperparameters
 # =============================================================================
 A2C_PARAMS: Dict[str, Any] = {
-    "learning_rate": 7e-4,
-    "n_steps": 5,
+    "learning_rate": 1e-4, # Significantly lowered from 7e-4 (A2C is sensitive)
+    "n_steps": 32,      # Higher than 5 to stabilize gradients
     "gamma": 0.99,
     "gae_lambda": 0.98,
-    "ent_coef": 0.05,
+    "ent_coef": 0.02,   # Lowered exploration pressure
     "vf_coef": 0.5,
     "max_grad_norm": 0.5,
-    "verbose": 1,
+    "verbose": 0,
     "policy_kwargs": {
         "features_extractor_class": TransformerFeatureExtractor,
         "features_extractor_kwargs": {
@@ -84,14 +84,14 @@ A2C_PARAMS: Dict[str, Any] = {
 # PINN Architecture
 # =============================================================================
 PINN_PARAMS: Dict[str, Any] = {
-    "hidden_layers": [64, 128, 64],
+    "hidden_layers": [64, 64, 64, 64],
     "activation": "tanh",
-    "dropout": 0.1,
+    "dropout": 0.0,
     "learning_rate": 1e-3,
     "weight_decay": 1e-5,
-    "physics_weight": 0.1,  # Weight for physics loss term
+    "physics_weight": 0.2,  # Weight for physics loss term (matches legacy 2.0/10.0)
     "epochs": 100,
-    "batch_size": 256,
+    "batch_size": 4096,
 }
 
 # =============================================================================
@@ -123,7 +123,7 @@ PINN_FEATURES_NORMALIZATION = {
 # A/B Testing Configuration
 # =============================================================================
 AB_TESTING_CONFIG: Dict[str, Any] = {
-    'enabled': True,                      # Enable A/B testing (with/without PINN)
+    'enabled': True,                     # Enable A/B testing (with/without PINN)
     'model_a_pinn': False,               # Model A: without PINN features
     'model_b_pinn': True,                # Model B: with PINN features
     'same_seeds': True,                  # Use same random seeds for fair comparison
@@ -186,17 +186,6 @@ COMPOSITE_REWARD_CONFIG: Dict[str, Any] = {
 }
 
 # =============================================================================
-# Training Configuration
-# =============================================================================
-TRAINING_CONFIG: Dict[str, Any] = {
-    "total_timesteps": 100_000,
-    "eval_freq": 10_000,
-    "n_eval_episodes": 5,
-    "save_freq": 25_000,
-    "log_interval": 10,
-}
-
-# =============================================================================
 # Environment Parameters
 # =============================================================================
 ENV_PARAMS: Dict[str, Any] = {
@@ -208,9 +197,16 @@ ENV_PARAMS: Dict[str, Any] = {
 }
 
 # =============================================================================
-# Training Configuration (Timeouts, Checkpointing)
+# Training Configuration (Unified — timesteps + timeouts + checkpointing)
 # =============================================================================
 TRAINING_CONFIG: Dict[str, Any] = {
+    # Core training schedule
+    "total_timesteps": 100_000,     # Total timesteps per window
+    "eval_freq": 10_000,            # Evaluation frequency
+    "n_eval_episodes": 5,           # Episodes per evaluation
+    "save_freq": 25_000,            # Model save frequency
+    "log_interval": 10,             # Logging interval
+    # Operational
     "timeout_seconds": 600,         # Training timeout (0 = no timeout)
     "checkpoint_interval": 10_000,  # Save checkpoint every N timesteps
     "keep_checkpoints": 3,          # Keep last N checkpoints

@@ -42,7 +42,7 @@ class PPOAgent(BaseDRLAgent):
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         clip_range: float = 0.2,
-        ent_coef: float = 0.01,
+        ent_coef: float = 0.05, # Increased from 0.01 for more exploration
         vf_coef: float = 0.5,
         max_grad_norm: float = 0.5,
         device: str = "auto",
@@ -94,7 +94,9 @@ class PPOAgent(BaseDRLAgent):
         
         # Configure logger to save progress.csv
         if tensorboard_log:
-            logger_format = ["stdout", "csv", "tensorboard"]
+            logger_format = ["csv", "tensorboard"]
+            if self.verbose > 0:
+                logger_format.append("stdout")
             custom_logger = configure(tensorboard_log, logger_format)
             self.model.set_logger(custom_logger)
         
@@ -108,6 +110,7 @@ class PPOAgent(BaseDRLAgent):
         eval_freq: int = 10_000,
         n_eval_episodes: int = 5,
         custom_callbacks: Optional[list] = None,
+        verbose: int = 1,
     ) -> None:
         """
         Train PPO agent.
@@ -118,6 +121,7 @@ class PPOAgent(BaseDRLAgent):
             save_dir: Directory for checkpoints
             eval_freq: Evaluation frequency (steps)
             n_eval_episodes: Episodes per evaluation
+            verbose: Verbosity (0 for silent)
         """
         callbacks = []
         
@@ -141,7 +145,7 @@ class PPOAgent(BaseDRLAgent):
         self.model.learn(
             total_timesteps=total_timesteps,
             callback=callback,
-            progress_bar=False,
+            progress_bar=(verbose > 0),
         )
         
         if save_dir:
@@ -191,7 +195,7 @@ class DDPGAgent(BaseDRLAgent):
         batch_size: int = 256,
         tau: float = 0.005,
         gamma: float = 0.99,
-        action_noise: Optional[float] = 0.1,
+        action_noise: float = 0.3, # Increased from 0.1 for more exploration
         device: str = "auto",
         verbose: int = 1,
         tensorboard_log: Optional[str] = None,
@@ -219,7 +223,9 @@ class DDPGAgent(BaseDRLAgent):
         
         # Action noise for exploration
         n_actions = env.action_space.shape[0]
-        noise = NormalActionNoise(
+        # Use Ornstein-Uhlenbeck noise instead of Normal for temporally correlated exploration
+        from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
+        noise = OrnsteinUhlenbeckActionNoise(
             mean=np.zeros(n_actions),
             sigma=action_noise * np.ones(n_actions)
         ) if action_noise else None
@@ -242,7 +248,9 @@ class DDPGAgent(BaseDRLAgent):
         
         # Configure logger to save progress.csv
         if tensorboard_log:
-            logger_format = ["stdout", "csv", "tensorboard"]
+            logger_format = ["csv", "tensorboard"]
+            if self.verbose > 0:
+                logger_format.append("stdout")
             custom_logger = configure(tensorboard_log, logger_format)
             self.model.set_logger(custom_logger)
         
@@ -256,6 +264,7 @@ class DDPGAgent(BaseDRLAgent):
         eval_freq: int = 10_000,
         n_eval_episodes: int = 5,
         custom_callbacks: Optional[list] = None,
+        verbose: int = 1,
     ) -> None:
         """
         Train DDPG agent.
@@ -266,6 +275,7 @@ class DDPGAgent(BaseDRLAgent):
             save_dir: Directory for checkpoints
             eval_freq: Evaluation frequency (steps)
             n_eval_episodes: Episodes per evaluation
+            verbose: Verbosity (0 for silent)
         """
         callbacks = []
         
@@ -289,7 +299,7 @@ class DDPGAgent(BaseDRLAgent):
         self.model.learn(
             total_timesteps=total_timesteps,
             callback=callback,
-            progress_bar=False,
+            progress_bar=(verbose > 0),
         )
         
         if save_dir:
@@ -337,7 +347,7 @@ class A2CAgent(BaseDRLAgent):
         n_steps: int = 5,
         gamma: float = 0.99,
         gae_lambda: float = 1.0,
-        ent_coef: float = 0.0,
+        ent_coef: float = 0.05, # Increased from 0.0 for more exploration
         vf_coef: float = 0.5,
         max_grad_norm: float = 0.5,
         use_rms_prop: bool = True,
@@ -386,7 +396,9 @@ class A2CAgent(BaseDRLAgent):
         
         # Configure logger to save progress.csv
         if tensorboard_log:
-            logger_format = ["stdout", "csv", "tensorboard"]
+            logger_format = ["csv", "tensorboard"]
+            if self.verbose > 0:
+                logger_format.append("stdout")
             custom_logger = configure(tensorboard_log, logger_format)
             self.model.set_logger(custom_logger)
         
@@ -400,6 +412,7 @@ class A2CAgent(BaseDRLAgent):
         eval_freq: int = 10_000,
         n_eval_episodes: int = 5,
         custom_callbacks: Optional[list] = None,
+        verbose: int = 1,
     ) -> None:
         """
         Train A2C agent.
@@ -410,6 +423,7 @@ class A2CAgent(BaseDRLAgent):
             save_dir: Directory for checkpoints
             eval_freq: Evaluation frequency (steps)
             n_eval_episodes: Episodes per evaluation
+            verbose: Verbosity (0 for silent)
         """
         callbacks = []
         
@@ -433,7 +447,7 @@ class A2CAgent(BaseDRLAgent):
         self.model.learn(
             total_timesteps=total_timesteps,
             callback=callback,
-            progress_bar=False,
+            progress_bar=(verbose > 0),
         )
         
         if save_dir:

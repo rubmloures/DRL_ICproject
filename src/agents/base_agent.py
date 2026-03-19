@@ -117,6 +117,11 @@ class BaseDRLAgent(ABC):
         """
         episode_rewards = []
         episode_lengths = []
+        episode_sharpes = []
+        episode_drawdowns = []
+        episode_win_rates = []
+        
+        import pandas as pd
         
         for episode in range(num_episodes):
             obs, _ = env.reset()
@@ -137,7 +142,25 @@ class BaseDRLAgent(ABC):
             
             episode_rewards.append(episode_reward)
             episode_lengths.append(episode_length)
-        
+            
+            # Calculate financial metrics if environment supports it
+            if hasattr(env, 'asset_memory') and len(env.asset_memory) > 1:
+                portfolio_values = pd.Series(env.asset_memory)
+                daily_returns = portfolio_values.pct_change().dropna()
+                
+                if len(daily_returns) > 1:
+                    vol = daily_returns.std()
+                    sharpe = (daily_returns.mean() / vol) * np.sqrt(252) if vol > 1e-9 else 0.0
+                    
+                    cumulative = (1 + daily_returns).cumprod()
+                    peak = cumulative.cummax()
+                    drawdown = float(((cumulative - peak) / peak).min())
+                    win_rate = float((daily_returns > 0).sum() / len(daily_returns))
+                    
+                    episode_sharpes.append(sharpe)
+                    episode_drawdowns.append(drawdown)
+                    episode_win_rates.append(win_rate)
+
         metrics = {
             'mean_reward': float(np.mean(episode_rewards)),
             'std_reward': float(np.std(episode_rewards)),
@@ -146,9 +169,16 @@ class BaseDRLAgent(ABC):
             'max_reward': float(np.max(episode_rewards)),
         }
         
+        # Add financial metrics if available
+        if episode_sharpes:
+            metrics['sharpe_ratio'] = float(np.mean(episode_sharpes))
+            metrics['max_drawdown'] = float(np.mean(episode_drawdowns))
+            metrics['win_rate'] = float(np.mean(episode_win_rates))
+        
         logger.info(
             f"Evaluation: mean_reward={metrics['mean_reward']:.4f} "
-            f"(±{metrics['std_reward']:.4f})"
+            f"Sharpe={metrics.get('sharpe_ratio', 0.0):.4f} "
+            f"WinRate={metrics.get('win_rate', 0.0):.2%}"
         )
         
         return metrics

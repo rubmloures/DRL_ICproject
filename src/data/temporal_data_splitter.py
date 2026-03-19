@@ -30,11 +30,12 @@ class TemporalDataSplitter:
     def split_temporal(
         self,
         df: pd.DataFrame,
-        train_until: str = '2023-12-31',
-        test_start: str = '2024-01-01',
-        test_until: str = '2024-12-31',
-        val_start: str = '2025-01-01'
+        train_until: str = '2024-12-31', # End of Train: 31/12/2024
+        test_start: str = '2025-01-01',  # Start of Test: 01/01/2025
+        test_until: str = '2025-06-30',  # End of Test: 30/06/2025 (H1)
+        val_start: str = '2025-07-01'    # Start of Val: 01/07/2025 (H2)
     ) -> Dict[str, pd.DataFrame]:
+
         """
         Split data into train/test/val based on temporal boundaries.
         
